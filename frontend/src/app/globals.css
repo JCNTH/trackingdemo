@@ -1,0 +1,139 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-size: 14px;
+  }
+
+  :root {
+    /* Base colors */
+    --color-white: 0 0% 100%;
+    --color-black: 0 0% 0%;
+    
+    /* Emerald palette */
+    --color-emerald-50: 167 45% 96%;
+    --color-emerald-100: 166 45% 91%;
+    --color-emerald-500: 164 39% 41%;
+    --color-emerald-600: 164 42% 33%;
+    --color-emerald-700: 164 43% 26%;
+    
+    /* Surfaces - Clean white */
+    --background: 0 0% 98%; /* #FAFAFA */
+    --foreground: 164 45% 17%; /* Dark emerald text */
+    
+    --card: 0 0% 100%;
+    --card-foreground: 164 45% 17%;
+    
+    --popover: 0 0% 100%;
+    --popover-foreground: 164 45% 17%;
+    
+    /* Brand - Emerald green */
+    --primary: 164 43% 26%; /* #047857 */
+    --primary-light: 167 45% 96%;
+    --primary-foreground: 0 0% 100%;
+    
+    --secondary: 0 0% 100%;
+    --secondary-foreground: 164 43% 26%;
+    
+    /* Muted - Soft green-gray */
+    --muted: 165 20% 96%;
+    --muted-foreground: 164 10% 40%;
+    
+    /* Accent - Very light emerald */
+    --accent: 164 45% 94%;
+    --accent-foreground: 164 43% 26%;
+    
+    /* Status */
+    --destructive: 0 85% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 164 42% 33%;
+    --warning: 35 90% 55%;
+    
+    /* UI */
+    --border: 164 10% 92%;
+    --input: 164 10% 92%;
+    --ring: 164 43% 26%;
+    
+    --radius: 0.625rem;
+    
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Monaco, monospace;
+  }
+
+  .dark {
+    --background: 165 47% 8%;
+    --foreground: 167 45% 96%;
+    --card: 165 47% 10%;
+    --card-foreground: 167 45% 96%;
+    --popover: 165 47% 10%;
+    --popover-foreground: 167 45% 96%;
+    --primary: 164 41% 52%;
+    --muted: 165 20% 15%;
+    --muted-foreground: 164 10% 65%;
+    --accent: 165 47% 15%;
+    --accent-foreground: 167 45% 96%;
+    --border: 165 20% 20%;
+    --input: 165 20% 20%;
+    --ring: 164 41% 52%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    line-height: 1.6;
+    letter-spacing: -0.01em;
+  }
+}
+
+html,
+body {
+  height: 100%;
+}
+
+/* Scrollbar - Emerald themed */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--primary) / 0.3);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--primary) / 0.5);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--primary) / 0.3) transparent;
+}
+
+/* Video canvas overlay */
+.video-container {
+  position: relative;
+}
+
+.trajectory-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+/* Video styling */
+video {
+  border-radius: var(--radius);
+}

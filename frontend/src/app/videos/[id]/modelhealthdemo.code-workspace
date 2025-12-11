@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"name": "modelhealthdemo",
+			"path": "../../../../.."
+		},
+		{
+			"name": "new-medicly-1",
+			"path": "../../../../../../new-medicly-1"
+		},
+		{
+			"name": "auctor-dev",
+			"path": "../../../../../../../Downloads/auctor-dev"
+		}
+	],
+	"settings": {}
+}

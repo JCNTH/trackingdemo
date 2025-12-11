@@ -1,0 +1,11 @@
+fastapi>=0.115.0
+uvicorn>=0.32.0
+python-multipart>=0.0.17
+supabase>=2.10.0
+ultralytics>=8.3.0
+mediapipe>=0.10.18
+opencv-python>=4.10.0
+numpy>=1.26.0
+python-dotenv>=1.0.0
+pydantic>=2.10.0
+

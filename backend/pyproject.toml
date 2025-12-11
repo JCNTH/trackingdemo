@@ -1,0 +1,30 @@
+[project]
+name = "exercise-tracker-backend"
+version = "0.1.0"
+description = "FastAPI backend for exercise tracking with YOLO and MediaPipe"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn>=0.32.0",
+    "python-multipart>=0.0.17",
+    "supabase>=2.10.0",
+    "ultralytics>=8.3.0",
+    "mediapipe>=0.10.18",
+    "opencv-python>=4.10.0",
+    "numpy>=1.26.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "httpx>=0.28.0",
+]
+
+[build-system]
+requires = ["setuptools>=75.0.0"]
+build-backend = "setuptools.build_meta"
+
