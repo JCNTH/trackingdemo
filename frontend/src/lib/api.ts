@@ -1,6 +1,18 @@
+/**
+ * API Client for Exercise Tracker Backend
+ * 
+ * Handles all communication with the FastAPI backend for:
+ * - Video calibration (person detection, pose estimation)
+ * - Video processing (trajectory tracking)
+ * - Weight detection (Claude Vision)
+ * - Data export
+ */
+
 const API_BASE = '/api/py'
 
-// Types for calibration response
+// ============================================================================
+// Types
+// ============================================================================
 export interface DetectedPerson {
   id: number
   bbox: [number, number, number, number]  // [x1, y1, x2, y2] in pixels

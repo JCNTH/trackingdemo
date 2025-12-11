@@ -1,57 +1,71 @@
-# Exercise Tracker MVP
+# Exercise Tracker
 
-Video-based exercise tracking with YOLO object detection and MediaPipe pose estimation. Upload exercise videos, process them to extract 2D trajectories, and visualize movement patterns.
+A video-based exercise tracking app that uses computer vision to analyze movement form. Upload a video of your lift, and get insights on bar path, velocity, and joint angles.
+
+Built this as part of my research on using pose estimation for fitness applications.
+
+## What It Does
+
+- **Upload exercise videos** - supports bench press, squat, deadlift, overhead press
+- **Track bar path** - estimates bar position from wrist landmarks
+- **Calculate velocity** - measures movement speed in pixels/second  
+- **Analyze form** - AI-powered feedback on elbow angles, bar path, etc.
+- **Detect weight** - uses Claude Vision to read plates from video frame
+
+## Demo
+
+https://github.com/user-attachments/assets/placeholder
+
+*(add your demo video/gif here)*
 
 ## Tech Stack
 
-- **Frontend:** Next.js 15, Tailwind CSS, React Query, Radix UI
-- **Backend:** FastAPI, YOLO v8, MediaPipe, OpenCV
-- **Database:** Supabase (PostgreSQL + Storage)
+| Layer | Tech |
+|-------|------|
+| Frontend | Next.js 15, Tailwind CSS, shadcn/ui |
+| Backend | FastAPI, Python 3.10+ |
+| CV | MediaPipe Pose, YOLO v8 |
+| AI | Claude Sonnet 4 (form analysis), Claude Vision (weight detection) |
+| Database | Supabase (PostgreSQL + Storage) |
 
-## Project Structure
+## How It Works
+
+The pipeline extracts 33 body keypoints per frame using MediaPipe, then tracks the bar position by calculating the midpoint between wrist landmarks. See [`backend/PIPELINE.md`](backend/PIPELINE.md) for the full technical breakdown.
 
 ```
-modelhealthdemo/
-├── frontend/           # Next.js app
-│   ├── src/
-│   │   ├── app/       # Pages and layouts
-│   │   ├── components/# UI components
-│   │   ├── lib/       # Utilities and API client
-│   │   └── types/     # TypeScript types
-│   └── package.json
-├── backend/           # FastAPI app
-│   ├── src/
-│   │   ├── routers/   # API endpoints
-│   │   ├── services/  # YOLO, MediaPipe, tracking
-│   │   └── db/        # Supabase client
-│   ├── environment.yml # Conda environment
-│   └── requirements.txt
-└── supabase/          # Database config
+Video → Pose Estimation → Bar Tracking → Velocity Calculation → Metrics
+         (MediaPipe)        (wrist midpoint)   (dx/dt)
 ```
 
 ## Setup
 
-### 1. Frontend Setup
+### Prerequisites
+
+- Node.js 18+
+- Python 3.10+ with Conda (recommended) or pip
+- Supabase account
+
+### 1. Clone and install
+
+```bash
+git clone https://github.com/JCNTH/exercise-tracker.git
+cd exercise-tracker
+```
+
+### 2. Frontend
 
 ```bash
 cd frontend
 npm install
 ```
 
-Create `.env.local` with your Supabase credentials:
-
-```env
-NEXT_PUBLIC_SUPABASE_URL=https://vcsxvrueuwyyhxygfois.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key_here
+Create `frontend/.env.local`:
+```
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
 ```
 
-Start the development server:
-
-```bash
-npm run dev
-```
-
-### 2. Backend Setup (Conda)
+### 3. Backend
 
 ```bash
 cd backend
@@ -59,81 +73,55 @@ conda env create -f environment.yml
 conda activate exercise-tracker
 ```
 
-Create `.env` with your Supabase credentials:
-
-```env
-SUPABASE_URL=https://vcsxvrueuwyyhxygfois.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
+Create `backend/.env`:
+```
+SUPABASE_URL=your_supabase_url
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+ANTHROPIC_API_KEY=your_anthropic_key  # for AI features
 ```
 
-Start the FastAPI server:
+### 4. Run
 
 ```bash
-python run.py --reload
-```
-
-Or without auto-reload:
-```bash
-python run.py
-```
-
-**Alternative (pip/venv):**
-```bash
-cd backend
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 3. Database Schema
-
-The database schema has been automatically created via Supabase MCP. Tables:
-
-- `videos` - Video metadata and processing status
-- `detection_results` - Per-frame object and pose detections
-- `tracking_sessions` - Aggregated trajectory data
-
-Storage bucket `videos` has been created for video uploads.
-
-## Features
-
-- **Video Upload:** Drag-and-drop or click to upload MP4 videos
-- **Object Detection:** YOLO v8 detects objects (people, sports equipment)
-- **Pose Estimation:** MediaPipe extracts 33 body landmarks per frame
-- **Trajectory Visualization:** Canvas overlay shows movement paths
-- **Data Export:** Download tracking data as JSON or CSV
-
-## API Endpoints
-
-### Videos
-- `GET /api/videos/{id}` - Get video details
-- `GET /api/videos/{id}/status` - Get processing status
-- `POST /api/videos/{id}/process` - Start video processing
-- `GET /api/videos/{id}/detections` - Get detection results
-- `GET /api/videos/{id}/export` - Export tracking data
-
-### Processing
-- `GET /api/processing/status/{id}` - Detailed processing status
-- `GET /api/processing/supported-objects` - List detectable objects
-- `GET /api/processing/pose-landmarks` - Pose landmark definitions
-
-## Development
-
-### Running Both Services
-
-Terminal 1 (Frontend):
-```bash
+# Terminal 1 - Frontend
 cd frontend && npm run dev
+
+# Terminal 2 - Backend  
+cd backend && python run.py
 ```
 
-Terminal 2 (Backend):
-```bash
-cd backend && python run.py --reload
+Open http://localhost:3000
+
+## Project Structure
+
+```
+├── frontend/
+│   ├── src/
+│   │   ├── app/            # Next.js pages
+│   │   ├── components/     # React components
+│   │   └── lib/            # API client, utilities
+│   
+├── backend/
+│   ├── src/
+│   │   ├── routers/        # FastAPI endpoints
+│   │   ├── services/       # CV pipeline (pose, tracking)
+│   │   └── db/             # Supabase client
+│   └── PIPELINE.md         # Technical documentation
 ```
 
-The frontend proxies `/api/py/*` requests to the backend at `http://localhost:8000`.
+## Limitations
+
+- Single camera setup means no true depth measurement
+- Velocity is in pixels/second (not cm/s) without calibration
+- Works best when camera is perpendicular to movement plane
+- Weight detection accuracy varies with video quality
+
+## References
+
+- [MediaPipe Pose](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker)
+- [Velocity Based Training Research](https://pmc.ncbi.nlm.nih.gov/articles/PMC7866505/)
+- [OpenCap](https://github.com/stanfordnmbl/opencap-core) - inspiration for architecture
 
 ## License
 
 MIT
-

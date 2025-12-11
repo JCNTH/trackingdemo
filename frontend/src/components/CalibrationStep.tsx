@@ -1,3 +1,16 @@
+/**
+ * CalibrationStep Component
+ * 
+ * Human-in-the-loop calibration workflow:
+ * 1. Extract a frame from the video
+ * 2. Detect all people using YOLO/MediaPipe
+ * 3. User selects which person to track
+ * 4. Show bar position preview (wrist midpoint)
+ * 5. Display weight detection results (if available)
+ * 6. Start processing on confirmation
+ * 
+ * This ensures accurate tracking when multiple people are in frame.
+ */
 'use client'
 
 import { useState } from 'react'
@@ -357,22 +370,26 @@ export function CalibrationStep({
               />
               {/* Overlay canvas for drawing crosshair */}
               <canvas
-                ref={(canvas) => {
-                  if (!canvas || !selectedPerson) return
-                  const ctx = canvas.getContext('2d')
-                  if (!ctx) return
+                ref={(canvasEl) => {
+                  if (!canvasEl || !selectedPerson) return
+                  const ctxEl = canvasEl.getContext('2d')
+                  if (!ctxEl) return
                   
-                  const img = canvas.previousElementSibling as HTMLImageElement
+                  const img = canvasEl.previousElementSibling as HTMLImageElement
                   if (!img.complete) {
-                    img.onload = () => drawOverlay()
+                    img.onload = () => drawOverlay(canvasEl, ctxEl, img)
                     return
                   }
-                  drawOverlay()
+                  drawOverlay(canvasEl, ctxEl, img)
                   
-                  function drawOverlay() {
+                  function drawOverlay(
+                    canvas: HTMLCanvasElement, 
+                    ctx: CanvasRenderingContext2D, 
+                    imgEl: HTMLImageElement
+                  ) {
                     // Use displayed dimensions, not natural
-                    const displayWidth = img.clientWidth
-                    const displayHeight = img.clientHeight
+                    const displayWidth = imgEl.clientWidth
+                    const displayHeight = imgEl.clientHeight
                     
                     canvas.width = displayWidth
                     canvas.height = displayHeight
@@ -381,7 +398,7 @@ export function CalibrationStep({
                     
                     ctx.clearRect(0, 0, canvas.width, canvas.height)
                     
-                    // Draw selected person bbox
+                    // Draw selected person bounding box (green)
                     const bbox = selectedPerson!.bbox_normalized
                     const x1 = bbox[0] * canvas.width
                     const y1 = bbox[1] * canvas.height
@@ -392,13 +409,12 @@ export function CalibrationStep({
                     ctx.lineWidth = 2
                     ctx.strokeRect(x1, y1, x2 - x1, y2 - y1)
                     
-                    // Draw bar position crosshair if available
+                    // Draw bar position crosshair (orange) if available
                     if (selectedPerson!.bar_center) {
                       const barX = selectedPerson!.bar_center.x * canvas.width
                       const barY = selectedPerson!.bar_center.y * canvas.height
                       const size = 15
                       
-                      // Orange crosshair
                       ctx.strokeStyle = '#f97316'
                       ctx.lineWidth = 3
                       ctx.lineCap = 'round'

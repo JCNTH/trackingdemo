@@ -1,3 +1,11 @@
+/**
+ * VideoUpload Component
+ * 
+ * Three-step upload flow:
+ * 1. Select exercise type (bench press, squat, etc.)
+ * 2. Drag-and-drop or browse for video file
+ * 3. Confirm and upload to Supabase Storage
+ */
 'use client'
 
 import { useState, useCallback } from 'react'
