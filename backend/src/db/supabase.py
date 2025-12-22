@@ -1,3 +1,12 @@
+"""
+Supabase database client for video storage and retrieval.
+
+Tables:
+  - videos: Uploaded video files and metadata
+  - detection_results: Frame-by-frame pose and object detections
+  - tracking_sessions: Aggregated trajectory data and metrics
+"""
+
 import os
 import logging
 from typing import Optional
@@ -10,7 +19,7 @@ _supabase_client: Optional[Client] = None
 
 
 def init_supabase() -> None:
-    """Initialize Supabase client."""
+    """Initialize Supabase client on application startup."""
     global _supabase_client
     
     url = os.getenv("SUPABASE_URL")
@@ -44,7 +53,15 @@ async def update_video_status(
     error_message: str | None = None,
     **kwargs
 ) -> dict:
-    """Update video status and metadata."""
+    """
+    Update video status and metadata.
+    
+    Args:
+        video_id: UUID of the video
+        status: One of 'pending', 'processing', 'completed', 'failed'
+        error_message: Optional error message if status is 'failed'
+        **kwargs: Additional fields to update (duration, width, height, fps)
+    """
     client = get_supabase()
     
     update_data = {"status": status, **kwargs}
@@ -56,7 +73,17 @@ async def update_video_status(
 
 
 async def insert_detection_results(video_id: str, results: list[dict]) -> None:
-    """Batch insert detection results."""
+    """
+    Batch insert detection results for each processed frame.
+    
+    Args:
+        video_id: UUID of the video
+        results: List of frame detection results with:
+            - frame_number: int
+            - timestamp: float (seconds)
+            - objects: list of detected objects with bboxes
+            - pose_landmarks: list of 33 pose landmarks (or None)
+    """
     client = get_supabase()
     
     # Prepare records
@@ -84,7 +111,19 @@ async def create_tracking_session(
     has_pose: bool,
     trajectory_data: dict | None = None
 ) -> dict:
-    """Create tracking session record."""
+    """
+    Create tracking session record with aggregated trajectory data.
+    
+    Args:
+        video_id: UUID of the video
+        object_count: Number of tracked objects (usually 1 for barbell)
+        has_pose: Whether pose was detected
+        trajectory_data: Dict containing:
+            - bar_path: List of {frame, timestamp, x, y} points
+            - velocity_metrics: Calculated velocity stats
+            - joint_angles: List of angle measurements per frame
+            - tracking_stats: Detection source breakdown
+    """
     client = get_supabase()
     
     result = client.table("tracking_sessions").insert({
@@ -98,7 +137,15 @@ async def create_tracking_session(
 
 
 async def download_video(storage_path: str) -> bytes:
-    """Download video from Supabase Storage."""
+    """
+    Download video from Supabase Storage.
+    
+    Args:
+        storage_path: Path within the 'videos' bucket
+        
+    Returns:
+        Raw video bytes
+    """
     import httpx
     
     url = os.getenv("SUPABASE_URL")
@@ -118,20 +165,3 @@ async def download_video(storage_path: str) -> bytes:
         )
         response.raise_for_status()
         return response.content
-
-
-async def update_video_weight(
-    video_id: str,
-    detected_weight: float,
-    weight_unit: str = "lbs"
-) -> dict:
-    """Update video with detected weight information."""
-    client = get_supabase()
-    
-    result = client.table("videos").update({
-        "detected_weight": detected_weight,
-        "weight_unit": weight_unit,
-    }).eq("id", video_id).execute()
-    
-    return result.data[0] if result.data else None
-

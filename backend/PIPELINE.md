@@ -29,38 +29,17 @@ Video → OpenCV VideoCapture → frame[height, width, 3]
 - Dimensions are in **pixels** (e.g., 1440×1920)
 - Frame rate (FPS) is extracted for time calculations
 
-**Code:** `trajectory_tracker.py` → `process_video()`
+**Code:** `trajectory_tracker.py` → `process_bench_press()`
 
 ---
 
-## Step 2: Person Detection (YOLO)
+## Step 2: Pose Estimation (MediaPipe)
 
-**Input:** BGR frame (pixels)  
-**Output:** Bounding boxes for each detected person
-
-```
-frame → YOLO v8 → [
-    {id: 0, bbox: [x1, y1, x2, y2], confidence: 0.95},
-    {id: 1, bbox: [x1, y1, x2, y2], confidence: 0.87},
-    ...
-]
-```
-
-- Bounding boxes are in **pixel coordinates**
-- Only class 0 (person) is detected
-- Confidence threshold: 0.4 (40%)
-
-**Code:** `yolo_detector.py` → `detect_objects()`
-
----
-
-## Step 3: Pose Estimation (MediaPipe / YOLO-Pose)
-
-**Input:** BGR frame + person bounding box  
+**Input:** BGR frame  
 **Output:** 33 body keypoints (landmarks)
 
 ```
-frame + bbox → MediaPipe Pose → landmarks[33]
+frame → MediaPipe Pose → landmarks[33]
 ```
 
 ### Landmark Output Format
@@ -126,7 +105,7 @@ Each landmark contains:
 
 ---
 
-## Step 4: Bar Position Estimation
+## Step 3: Bar Position Estimation
 
 **Input:** Pose landmarks (normalized)  
 **Output:** Bar center position (pixels)
@@ -179,7 +158,7 @@ if distance > 500px:
 
 ---
 
-## Step 5: Trajectory Building
+## Step 4: Trajectory Building
 
 **Input:** Bar positions over all frames  
 **Output:** `bar_trajectory[]` array
@@ -198,11 +177,11 @@ bar_trajectory = [
 - **timestamp:** Time in seconds (frame / fps)
 - **source:** Detection method used
 
-**Code:** `trajectory_tracker.py` → `process_video()`
+**Code:** `trajectory_tracker.py` → `process_bench_press()`
 
 ---
 
-## Step 6: Velocity Calculation
+## Step 5: Velocity Calculation
 
 **Input:** `bar_trajectory[]` + FPS  
 **Output:** Velocity metrics
@@ -248,7 +227,7 @@ Therefore:
 
 ---
 
-## Step 7: Output Metrics
+## Step 6: Output Metrics
 
 **Final output saved to database:**
 
@@ -273,13 +252,36 @@ velocity_metrics = {
 
 ---
 
+## Step 7: Form Analysis
+
+**Input:** Trajectory, velocity metrics, joint angles  
+**Output:** Form score and recommendations
+
+```python
+# Scoring criteria
+score = 70  # base score
+
+if path_verticality > 0.7:
+    score += 10  # Good bar path control
+elif path_verticality < 0.4:
+    score -= 10  # Excessive horizontal movement
+
+if elbow_asymmetry < 10°:
+    score += 5   # Good symmetry
+elif elbow_asymmetry > 20°:
+    score -= 10  # Significant imbalance
+```
+
+**Code:** `form_analyzer.py` → `analyze_bench_press()`
+
+---
+
 ## Coordinate Spaces Summary
 
 | Space | Range | Origin | Used For |
 |-------|-------|--------|----------|
 | **Pixel** | (0,0) to (W,H) | Top-left | Bar tracking, velocity |
 | **Normalized** | (0,0) to (1,1) | Top-left | Pose landmarks |
-| **World** | Meters (estimated) | Hip center | 3D visualization (MediaPipe only) |
 
 ---
 
@@ -303,13 +305,7 @@ velocity_metrics = {
                              │
                              ▼
   ┌─────────────────────────────────────────────────────────────┐
-  │  STEP 2: Person Detection (YOLO v8)                         │
-  │  Output: bounding box [x1, y1, x2, y2] in PIXELS            │
-  └──────────────────────────┬──────────────────────────────────┘
-                             │
-                             ▼
-  ┌─────────────────────────────────────────────────────────────┐
-  │  STEP 3: Pose Estimation (MediaPipe)                        │
+  │  STEP 2: Pose Estimation (MediaPipe)                        │
   │  Output: landmarks[33] with x, y in NORMALIZED [0-1]        │
   │          z = relative depth (unitless)                      │
   │          visibility = confidence [0-1]                      │
@@ -317,7 +313,7 @@ velocity_metrics = {
                              │
                              ▼
   ┌─────────────────────────────────────────────────────────────┐
-  │  STEP 4: Bar Position Estimation                            │
+  │  STEP 3: Bar Position Estimation                            │
   │  Method: forearm_extended (elbow → wrist → grip)            │
   │  Output: (bar_x, bar_y) in PIXEL coordinates                │
   │                                                             │
@@ -326,7 +322,7 @@ velocity_metrics = {
                              │
                              ▼
   ┌─────────────────────────────────────────────────────────────┐
-  │  STEP 5: Smoothing & Filtering                              │
+  │  STEP 4: Smoothing & Filtering                              │
   │  • EMA (α=0.5): smoothed = α×new + (1-α)×smoothed           │
   │  • Jump rejection: if Δ > 500px, reject                     │
   │  • Buffer: 3-frame moving average                           │
@@ -335,17 +331,7 @@ velocity_metrics = {
                              │
                              ▼
   ┌─────────────────────────────────────────────────────────────┐
-  │  STEP 6: Trajectory Building                                │
-  │  Output: bar_trajectory[frame] = {                          │
-  │    x: pixels, y: pixels,                                    │
-  │    frame: int, timestamp: seconds,                          │
-  │    source: "forearm_extended" | "wrist_fallback" | ...      │
-  │  }                                                          │
-  └──────────────────────────┬──────────────────────────────────┘
-                             │
-                             ▼
-  ┌─────────────────────────────────────────────────────────────┐
-  │  STEP 7: Velocity Calculation                               │
+  │  STEP 5: Velocity Calculation                               │
   │                                                             │
   │  dx = x[i] - x[i-1]           (pixels)                      │
   │  dy = y[i] - y[i-1]           (pixels)                      │
@@ -362,7 +348,7 @@ velocity_metrics = {
                              │
                              ▼
   ┌─────────────────────────────────────────────────────────────┐
-  │  STEP 8: Output Metrics                                     │
+  │  STEP 6: Output Metrics                                     │
   │                                                             │
   │  {                                                          │
   │    peak_concentric_velocity: px/s,                          │
@@ -373,6 +359,16 @@ velocity_metrics = {
   │    path_verticality: 0-1,                                   │
   │    estimated_reps: int                                      │
   │  }                                                          │
+  └──────────────────────────┬──────────────────────────────────┘
+                             │
+                             ▼
+  ┌─────────────────────────────────────────────────────────────┐
+  │  STEP 7: Form Analysis (Rule-Based)                         │
+  │                                                             │
+  │  Score based on:                                            │
+  │    • Path verticality (bar control)                         │
+  │    • Elbow asymmetry (left/right balance)                   │
+  │    • Tracking quality                                       │
   └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -411,8 +407,7 @@ velocity_cms = velocity_pxs / pixels_per_cm
 | `yolo_detector.py` | YOLO object detection |
 | `yolo_pose_estimator.py` | YOLO-Pose single-pass detection |
 | `barbell_detector.py` | Bar position estimation + smoothing |
-| `form_analyzer.py` | AI-based form analysis (Claude) |
-| `weight_detector.py` | AI-based weight detection (Claude Vision) |
+| `form_analyzer.py` | Rule-based form analysis |
 
 ---
 

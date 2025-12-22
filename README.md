@@ -2,21 +2,12 @@
 
 A video-based exercise tracking app that uses computer vision to analyze movement form. Upload a video of your lift, and get insights on bar path, velocity, and joint angles.
 
-Built this as part of my research on using pose estimation for fitness applications.
-
 ## What It Does
 
 - **Upload exercise videos** - supports bench press, squat, deadlift, overhead press
 - **Track bar path** - estimates bar position from wrist landmarks
 - **Calculate velocity** - measures movement speed in pixels/second  
-- **Analyze form** - AI-powered feedback on elbow angles, bar path, etc.
-- **Detect weight** - uses Claude Vision to read plates from video frame
-
-## Demo
-
-https://github.com/user-attachments/assets/placeholder
-
-*(add your demo video/gif here)*
+- **Analyze form** - rule-based feedback on elbow angles, bar path verticality, etc.
 
 ## Tech Stack
 
@@ -24,8 +15,7 @@ https://github.com/user-attachments/assets/placeholder
 |-------|------|
 | Frontend | Next.js 15, Tailwind CSS, shadcn/ui |
 | Backend | FastAPI, Python 3.10+ |
-| CV | MediaPipe Pose, YOLO v8 |
-| AI | Claude Sonnet 4 (form analysis), Claude Vision (weight detection) |
+| CV | MediaPipe Pose, YOLO v8/v11 |
 | Database | Supabase (PostgreSQL + Storage) |
 
 ## How It Works
@@ -48,8 +38,8 @@ Video → Pose Estimation → Bar Tracking → Velocity Calculation → Metrics
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/JCNTH/exercise-tracker.git
-cd exercise-tracker
+git clone https://github.com/JCNTH/trackingdemo.git
+cd trackingdemo
 ```
 
 ### 2. Frontend
@@ -77,7 +67,6 @@ Create `backend/.env`:
 ```
 SUPABASE_URL=your_supabase_url
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-ANTHROPIC_API_KEY=your_anthropic_key  # for AI features
 ```
 
 ### 4. Run
@@ -109,12 +98,33 @@ Open http://localhost:3000
 │   └── PIPELINE.md         # Technical documentation
 ```
 
+## Backend Services
+
+| File | Purpose |
+|------|---------|
+| `trajectory_tracker.py` | Main pipeline orchestration |
+| `pose_estimator.py` | MediaPipe pose detection (33 keypoints) |
+| `barbell_detector.py` | Bar position estimation + smoothing |
+| `form_analyzer.py` | Rule-based form analysis |
+| `yolo_detector.py` | YOLO object detection |
+| `yolo_pose_estimator.py` | YOLO-Pose single-pass detection |
+
+## Metrics Calculated
+
+| Metric | Description |
+|--------|-------------|
+| `peak_concentric_velocity` | Max upward speed (px/s) |
+| `peak_eccentric_velocity` | Max downward speed (px/s) |
+| `vertical_displacement` | Total range of motion (px) |
+| `path_verticality` | 0-1 score (1 = perfectly vertical) |
+| `estimated_reps` | Count of lift cycles |
+| `elbow_asymmetry` | Difference between left/right elbow angles |
+
 ## Limitations
 
 - Single camera setup means no true depth measurement
 - Velocity is in pixels/second (not cm/s) without calibration
 - Works best when camera is perpendicular to movement plane
-- Weight detection accuracy varies with video quality
 
 ## References
 

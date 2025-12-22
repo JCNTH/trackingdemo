@@ -1,9 +1,42 @@
 """
 Video Processing Pipeline for Exercise Tracking
 
-Processes video → extracts pose → tracks bar → calculates velocity metrics.
+This is the main processing pipeline that:
+1. Extracts frames from video
+2. Runs pose estimation (MediaPipe)
+3. Tracks bar position (from wrist landmarks)
+4. Calculates velocity metrics
 
-References:
+================================================================================
+COORDINATE SYSTEMS
+================================================================================
+
+PIXEL COORDINATES:
+  - Used for bar tracking and velocity calculations
+  - Origin (0, 0) at top-left corner
+  - x increases → right
+  - y increases ↓ down (IMPORTANT: Y is inverted!)
+
+NORMALIZED COORDINATES:
+  - Output from MediaPipe pose estimation
+  - Range [0, 1] for both x and y
+  - Conversion: pixel_x = normalized_x × frame_width
+
+================================================================================
+VELOCITY CALCULATION
+================================================================================
+
+Since Y increases downward in image coordinates:
+  - Negative dy = bar moving UP (concentric/lifting phase)
+  - Positive dy = bar moving DOWN (eccentric/lowering phase)
+  
+We invert this for intuitive output:
+  vertical_velocity = -dy / dt
+  (positive = upward, negative = downward)
+
+================================================================================
+REFERENCES
+================================================================================
 - MediaPipe Pose: https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker
 - VBT Research: https://pmc.ncbi.nlm.nih.gov/articles/PMC7866505/
 """
@@ -21,6 +54,7 @@ import numpy as np
 
 from services.pose_estimator import estimator as pose_estimator
 from services.barbell_detector import detect_barbell, reset_barbell_tracking, set_barbell_fps
+from services.form_analyzer import analyze_bench_press
 from db.supabase import download_video, update_video_status, insert_detection_results, create_tracking_session
 
 logger = logging.getLogger(__name__)
@@ -31,20 +65,19 @@ ProcessingMode = Literal["general", "bench_press"]
 # =============================================================================
 # SECTION 1: ANGLE CALCULATION
 # =============================================================================
-# Calculates joint angles from three landmark points using vector math.
-# Used for elbow angle analysis in bench press form checking.
 
 def calculate_angle(p1: Dict, p2: Dict, p3: Dict) -> Optional[float]:
     """
-    Calculate angle at p2 formed by vectors p1→p2 and p3→p2.
+    Calculate the angle at p2 formed by vectors p1→p2 and p3→p2.
     
-    Uses dot product formula: cos(θ) = (v1 · v2) / (|v1| × |v2|)
+    Uses the dot product formula:
+        cos(θ) = (v1 · v2) / (|v1| × |v2|)
     
     Args:
         p1, p2, p3: Landmark dicts with 'x', 'y' keys (normalized 0-1)
-    
+        
     Returns:
-        Angle in degrees, or None if landmarks have low visibility
+        Angle in degrees, or None if any landmark has low visibility (<0.3)
     """
     # Skip if any landmark is not visible enough
     if any(p.get("visibility", 0) < 0.3 for p in [p1, p2, p3]):
@@ -70,10 +103,8 @@ def calculate_joint_angles(pose_landmarks: List[Dict]) -> Dict:
         13, 14 = elbows  
         15, 16 = wrists
     
-    Returns dict with:
-        - left_elbow, right_elbow: angle in degrees
-        - avg_elbow_angle: average of both
-        - elbow_asymmetry: difference between sides
+    Returns:
+        Dict with left_elbow, right_elbow, avg_elbow_angle, elbow_asymmetry
     """
     if not pose_landmarks or len(pose_landmarks) < 17:
         return {}
@@ -84,8 +115,10 @@ def calculate_joint_angles(pose_landmarks: List[Dict]) -> Dict:
     left = calculate_angle(pose_landmarks[11], pose_landmarks[13], pose_landmarks[15])
     right = calculate_angle(pose_landmarks[12], pose_landmarks[14], pose_landmarks[16])
     
-    if left: angles["left_elbow"] = left
-    if right: angles["right_elbow"] = right
+    if left:
+        angles["left_elbow"] = left
+    if right:
+        angles["right_elbow"] = right
     
     if left and right:
         angles["avg_elbow_angle"] = (left + right) / 2
@@ -95,22 +128,20 @@ def calculate_joint_angles(pose_landmarks: List[Dict]) -> Dict:
 
 
 # =============================================================================
-# SECTION 2: VELOCITY CALCULATION  
+# SECTION 2: VELOCITY CALCULATION
 # =============================================================================
-# Converts bar trajectory (pixel positions) into velocity metrics.
-# Key insight: Y-axis is INVERTED in image coordinates.
 
 def calculate_velocity_metrics(bar_trajectory: List[Dict], fps: float, frame_height: int) -> Dict:
     """
     Calculate velocity-based training (VBT) metrics from bar path.
     
-    COORDINATE SYSTEM:
-        - Input: bar positions in PIXEL coordinates (x, y)
-        - Y-axis is INVERTED: y=0 is TOP, y=height is BOTTOM
-        - Therefore: negative dy = bar moving UP (concentric)
-                     positive dy = bar moving DOWN (eccentric)
+    IMPORTANT - Y-AXIS IS INVERTED:
+        - In image coordinates, y=0 is TOP, y=height is BOTTOM
+        - Negative dy = bar moving UP (concentric/lifting)
+        - Positive dy = bar moving DOWN (eccentric/lowering)
+        - We output vertical_velocity with positive = upward
     
-    VELOCITY FORMULA:
+    Velocity formula:
         dx = curr.x - prev.x         (pixels)
         dy = curr.y - prev.y         (pixels)  
         dt = frame_diff / fps        (seconds)
@@ -118,16 +149,25 @@ def calculate_velocity_metrics(bar_trajectory: List[Dict], fps: float, frame_hei
         velocity = distance / time   (pixels/second)
         vertical_velocity = -dy/dt   (positive = upward)
     
+    Args:
+        bar_trajectory: List of {frame, timestamp, x, y, ...} points
+        fps: Video frame rate
+        frame_height: Video height in pixels (for reference)
+        
     Returns:
+        Dict with velocity metrics:
         - peak_concentric_velocity: max upward speed (px/s)
         - peak_eccentric_velocity: max downward speed (px/s)
-        - vertical_displacement: total Y range of motion (px)
+        - average_speed: mean speed (px/s)
+        - vertical_displacement: total Y range (px)
+        - horizontal_deviation: total X range (px)
         - path_verticality: 0-1 score (1 = perfectly vertical)
-        - estimated_reps: count of complete lift cycles
+        - estimated_reps: count of lift cycles
     """
     if len(bar_trajectory) < 2:
         return {}
     
+    # Sort by frame number
     sorted_traj = sorted(bar_trajectory, key=lambda p: p["frame"])
     
     # Calculate frame-to-frame velocities
@@ -179,7 +219,14 @@ def calculate_velocity_metrics(bar_trajectory: List[Dict], fps: float, frame_hei
 
 
 def _count_reps(y_positions: List[float], displacement: float) -> int:
-    """Count rep cycles by tracking when bar crosses midpoint going UP."""
+    """
+    Count rep cycles by tracking when bar crosses midpoint going UP.
+    
+    Since Y is inverted (0=top, max=bottom):
+    - "Below midpoint" means y > mid_y (bar is lower/closer to bottom)
+    - "Above midpoint" means y < mid_y (bar is higher/closer to top)
+    - Crossing UP means going from y > mid_y to y < mid_y
+    """
     if len(y_positions) < 10 or displacement < 50:
         return 0
     
@@ -199,12 +246,6 @@ def _count_reps(y_positions: List[float], displacement: float) -> int:
 # =============================================================================
 # SECTION 3: MAIN PROCESSING PIPELINE
 # =============================================================================
-# Orchestrates the full video processing workflow:
-# 1. Download video from Supabase
-# 2. Extract frames with OpenCV
-# 3. Run pose estimation (MediaPipe)
-# 4. Track bar position (wrist midpoint)
-# 5. Calculate metrics and save to database
 
 async def process_video_pipeline(
     video_id: str,
@@ -215,8 +256,14 @@ async def process_video_pipeline(
     """
     Main entry point for video processing.
     
-    Pipeline:
-        Video file → Frame extraction → Pose estimation → Bar tracking → Metrics
+    Pipeline steps:
+        1. Download video from Supabase storage
+        2. Extract frames using OpenCV
+        3. Run pose estimation (MediaPipe) on each frame
+        4. Track bar position using wrist landmarks
+        5. Calculate velocity metrics
+        6. Run form analysis
+        7. Save results to database
     """
     try:
         logger.info(f"Starting processing: video={video_id}, mode={mode}")
@@ -229,10 +276,10 @@ async def process_video_pipeline(
             tmp_path = tmp.name
         
         try:
-            # Process based on mode
+            # Process the video
             results = process_bench_press(tmp_path, selected_person_bbox=selected_person_bbox)
             
-            # Save to database
+            # Save video metadata
             await update_video_status(
                 video_id, "completed",
                 duration=results["duration"],
@@ -241,8 +288,10 @@ async def process_video_pipeline(
                 fps=results["fps"],
             )
             
+            # Save frame-by-frame detections
             await insert_detection_results(video_id, results["frames"])
             
+            # Save trajectory and metrics
             trajectory_data = results["trajectories"].copy()
             if results.get("form_analysis"):
                 trajectory_data["form_analysis"] = results["form_analysis"]
@@ -267,7 +316,6 @@ async def process_video_pipeline(
 # =============================================================================
 # SECTION 4: FRAME-BY-FRAME PROCESSING
 # =============================================================================
-# The core processing loop that runs on each video frame.
 
 def process_bench_press(
     video_path: str,
@@ -278,21 +326,29 @@ def process_bench_press(
     Process video frame-by-frame for bench press analysis.
     
     For each frame:
-        1. Extract frame (OpenCV)
-        2. Run pose estimation (MediaPipe) → 33 landmarks in normalized [0-1] coords
-        3. Estimate bar position (wrist midpoint) → pixel coordinates
+        1. Read frame using OpenCV
+        2. Run pose estimation → 33 landmarks in normalized [0-1] coords
+        3. Estimate bar position → pixel coordinates
         4. Calculate joint angles
         5. Store trajectory point
     
     After all frames:
         6. Calculate velocity metrics
-        7. Run AI form analysis
+        7. Run form analysis
+        
+    Args:
+        video_path: Path to video file
+        sample_rate: Process every Nth frame (1 = all frames)
+        selected_person_bbox: Optional [x1,y1,x2,y2] normalized bbox to focus on
+        
+    Returns:
+        Dict with all processing results
     """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise ValueError(f"Could not open video: {video_path}")
     
-    # Video properties
+    # Extract video properties
     fps = cap.get(cv2.CAP_PROP_FPS)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -308,7 +364,7 @@ def process_bench_press(
     # Set ROI for pose estimation
     tracking_roi = _get_tracking_roi(selected_person_bbox)
     
-    # Storage
+    # Storage for results
     frames_data = []
     bar_trajectory = []
     pose_trajectories = defaultdict(list)
@@ -319,12 +375,13 @@ def process_bench_press(
     frame_number = 0
     start_time = time.time()
     
-    # MAIN PROCESSING LOOP
+    # ===== MAIN PROCESSING LOOP =====
     while True:
         ret, frame = cap.read()
         if not ret:
             break
         
+        # Skip frames based on sample rate
         if frame_number % sample_rate != 0:
             frame_number += 1
             continue
@@ -334,7 +391,7 @@ def process_bench_press(
         # STEP 1: Pose estimation (returns 33 landmarks in normalized coords)
         pose_landmarks = pose_estimator.estimate(frame, roi=tracking_roi)
         
-        # STEP 2: Bar detection (converts landmarks to pixel coords, estimates bar position)
+        # STEP 2: Bar detection (converts landmarks to pixel coords)
         barbell_result = detect_barbell(frame, pose_landmarks)
         source = barbell_result.get("source", "none")
         bar_detections[source] += 1
@@ -370,7 +427,7 @@ def process_bench_press(
                 joint_angles["frame"] = frame_number
                 joint_angles_history.append(joint_angles)
             
-            # Store key joint trajectories (convert normalized → pixels)
+            # Store wrist trajectories (convert normalized → pixels)
             for idx, name in [(15, "left_wrist"), (16, "right_wrist")]:
                 if idx < len(pose_landmarks):
                     lm = pose_landmarks[idx]
@@ -380,6 +437,7 @@ def process_bench_press(
                         "y": lm["y"] * height,
                     })
         
+        # Store frame data
         frames_data.append({
             "frame_number": frame_number,
             "timestamp": timestamp,
@@ -390,6 +448,7 @@ def process_bench_press(
         
         frame_number += 1
         
+        # Log progress every 50 frames
         if frame_number % 50 == 0:
             _log_progress(frame_number, total_frames, start_time, bar_detections)
     
@@ -398,8 +457,9 @@ def process_bench_press(
     # STEP 5: Calculate velocity metrics from trajectory
     velocity_metrics = calculate_velocity_metrics(bar_trajectory, fps, height)
     
-    # Build output
+    # Build tracking stats for output
     tracking_stats = _normalize_tracking_stats(bar_detections)
+    
     trajectories = {
         "bar_path": bar_trajectory,
         "velocity_metrics": velocity_metrics,
@@ -408,11 +468,16 @@ def process_bench_press(
         "pose": {"landmarks": dict(pose_trajectories)} if pose_trajectories else None,
     }
     
-    # STEP 6: AI form analysis
-    form_analysis = _run_form_analysis(
-        bar_trajectory, velocity_metrics, joint_angles_history,
-        tracking_stats, duration, fps, width, height
-    )
+    # STEP 6: Run form analysis
+    form_analysis = None
+    if bar_trajectory and velocity_metrics:
+        form_analysis = analyze_bench_press(
+            trajectory_data={"bar_path": bar_trajectory, "joint_angles": joint_angles_history},
+            velocity_metrics=velocity_metrics,
+            joint_angles=joint_angles_history,
+            tracking_stats=tracking_stats,
+            video_info={"duration": duration, "fps": fps, "width": width, "height": height},
+        )
     
     _log_final_stats(bar_detections, velocity_metrics, frame_number, start_time)
     
@@ -436,7 +501,15 @@ def process_bench_press(
 # =============================================================================
 
 def _get_tracking_roi(selected_person_bbox: Optional[List[float]]) -> tuple:
-    """Get region of interest for pose estimation."""
+    """
+    Get region of interest for pose estimation.
+    
+    Args:
+        selected_person_bbox: [x1, y1, x2, y2] in normalized coords
+        
+    Returns:
+        ROI tuple (x1, y1, x2, y2) with padding
+    """
     if selected_person_bbox:
         padding = 0.1
         return (
@@ -449,7 +522,7 @@ def _get_tracking_roi(selected_person_bbox: Optional[List[float]]) -> tuple:
 
 
 def _normalize_tracking_stats(bar_detections: Dict) -> Dict:
-    """Normalize tracking stats for frontend display."""
+    """Convert detection source counts to frontend-friendly format."""
     return {
         "both_wrists": sum(bar_detections.get(s, 0) for s in 
             ["forearm_extended", "weighted_wrists", "raw_midpoint"]),
@@ -457,26 +530,6 @@ def _normalize_tracking_stats(bar_detections: Dict) -> Dict:
             ["right_forearm", "left_forearm", "right_estimated", "left_estimated", "right_only", "left_only"]),
         "lost": sum(bar_detections.get(s, 0) for s in ["lost", "no_pose", "none"]),
     }
-
-
-def _run_form_analysis(bar_trajectory, velocity_metrics, joint_angles, tracking_stats, 
-                       duration, fps, width, height) -> Optional[Dict]:
-    """Run AI-powered form analysis if data available."""
-    if not bar_trajectory or not velocity_metrics:
-        return None
-    
-    try:
-        from services.form_analyzer import analyze_bench_press
-        return analyze_bench_press(
-            trajectory_data={"bar_path": bar_trajectory, "joint_angles": joint_angles},
-            velocity_metrics=velocity_metrics,
-            joint_angles=joint_angles,
-            tracking_stats=tracking_stats,
-            video_info={"duration": duration, "fps": fps, "width": width, "height": height},
-        )
-    except Exception as e:
-        logger.warning(f"Form analysis failed: {e}")
-        return {"error": str(e), "success": False}
 
 
 def _log_progress(frame_number: int, total_frames: int, start_time: float, bar_detections: Dict):

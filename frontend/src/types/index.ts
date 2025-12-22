@@ -18,8 +18,6 @@ export interface Video {
   fps: number | null
   error_message: string | null
   exercise_type: ExerciseType | null
-  detected_weight: number | null
-  weight_unit: 'lbs' | 'kg' | null
   created_at: string
   updated_at: string
 }
@@ -90,4 +88,3 @@ export interface PoseTrajectory {
 
 // Re-export database types
 export type { Database } from './database'
-

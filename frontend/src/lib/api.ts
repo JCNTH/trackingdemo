@@ -4,7 +4,6 @@
  * Handles all communication with the FastAPI backend for:
  * - Video calibration (person detection, pose estimation)
  * - Video processing (trajectory tracking)
- * - Weight detection (Claude Vision)
  * - Data export
  */
 
@@ -34,18 +33,6 @@ export interface DetectedPerson {
 
 export type PoseBackend = 'yolo' | 'mediapipe'
 
-export interface WeightDetectionResult {
-  success: boolean
-  total_weight?: number
-  weight_unit?: string
-  bar_weight?: number
-  plates_left?: Array<{ weight: number; color: string; count: number }>
-  plates_right?: Array<{ weight: number; color: string; count: number }>
-  confidence?: number
-  notes?: string
-  error?: string
-}
-
 export interface CalibrationResponse {
   video_id: string
   frame_number: number
@@ -56,7 +43,6 @@ export interface CalibrationResponse {
   frame_image: string  // base64 encoded JPEG
   people: DetectedPerson[]
   pose_backend: PoseBackend
-  weight_detection?: WeightDetectionResult
 }
 
 class ApiClient {
@@ -161,44 +147,6 @@ class ApiClient {
 
     return response.blob()
   }
-
-  /**
-   * Detect weight plates from video using Claude Vision.
-   * Analyzes a frame to identify and count weight plates.
-   */
-  async detectWeight(videoId: string, frameNumber?: number) {
-    return this.request<{
-      video_id: string
-      frame_analyzed: number
-      success: boolean
-      total_weight: number | null
-      weight_unit: 'lbs' | 'kg'
-      bar_weight: number
-      confidence: number
-      plates_left: Array<{ weight: number; color: string; count: number }>
-      plates_right: Array<{ weight: number; color: string; count: number }>
-      notes?: string
-      error?: string
-    }>(
-      `/processing/detect-weight/${videoId}`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ frame_number: frameNumber }),
-      }
-    )
-  }
-
-  /**
-   * Check if weight detection is available.
-   */
-  async getWeightDetectionStatus() {
-    return this.request<{
-      available: boolean
-      model: string | null
-      note: string | null
-    }>('/processing/weight-detection-status')
-  }
 }
 
 export const apiClient = new ApiClient()
-

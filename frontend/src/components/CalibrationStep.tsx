@@ -6,24 +6,22 @@
  * 2. Detect all people using YOLO/MediaPipe
  * 3. User selects which person to track
  * 4. Show bar position preview (wrist midpoint)
- * 5. Display weight detection results (if available)
- * 6. Start processing on confirmation
+ * 5. Start processing on confirmation
  * 
  * This ensures accurate tracking when multiple people are in frame.
  */
 'use client'
 
 import { useState } from 'react'
-import { useQuery, useMutation } from '@tanstack/react-query'
-import { toast } from 'sonner'
+import { useQuery } from '@tanstack/react-query'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { PersonSelector } from '@/components/PersonSelector'
 import { 
   Loader2, AlertCircle, RefreshCw, Target, 
-  ChevronRight, CheckCircle2, Scale
+  ChevronRight, CheckCircle2
 } from 'lucide-react'
-import { apiClient, type DetectedPerson, type CalibrationResponse, type PoseBackend, type WeightDetectionResult } from '@/lib/api'
+import { apiClient, type DetectedPerson, type PoseBackend } from '@/lib/api'
 
 interface CalibrationStepProps {
   videoId: string
@@ -121,7 +119,7 @@ export function CalibrationStep({
           <div className="text-center">
             <p className="font-medium">Analyzing Video</p>
             <p className="text-sm text-muted-foreground mt-1">
-              Detecting people, poses, and weight...
+              Detecting people and poses...
             </p>
           </div>
         </div>
@@ -279,18 +277,6 @@ export function CalibrationStep({
                   </div>
                 </div>
               ))}
-              {/* Weight Detection */}
-              <div className="border-t border-border my-2" />
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Weight</span>
-                {calibrationData.weight_detection?.success && calibrationData.weight_detection.total_weight ? (
-                  <span className="text-green-600">
-                    {calibrationData.weight_detection.total_weight} {calibrationData.weight_detection.weight_unit || 'lbs'}
-                  </span>
-                ) : (
-                  <span className="text-amber-600">detecting...</span>
-                )}
-              </div>
             </div>
           </Card>
         </div>
@@ -450,44 +436,6 @@ export function CalibrationStep({
           </Card>
         )}
 
-        {/* Weight Detection Result */}
-        {calibrationData.weight_detection && (
-          <Card className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-primary/10">
-                <Scale className="h-5 w-5 text-primary" />
-              </div>
-              <div className="flex-1">
-                {calibrationData.weight_detection.success && calibrationData.weight_detection.total_weight ? (
-                  <>
-                    <p className="text-xs text-muted-foreground">Detected Weight</p>
-                    <div className="flex items-baseline gap-1">
-                      <span className="text-xl font-bold tabular-nums">
-                        {calibrationData.weight_detection.total_weight}
-                      </span>
-                      <span className="text-sm text-muted-foreground">
-                        {calibrationData.weight_detection.weight_unit || 'lbs'}
-                      </span>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-sm font-medium text-muted-foreground">Weight Not Detected</p>
-                    <p className="text-xs text-muted-foreground">
-                      {calibrationData.weight_detection.error || 'Could not identify weight plates'}
-                    </p>
-                  </>
-                )}
-              </div>
-              {calibrationData.weight_detection.confidence && (
-                <span className="text-xs text-muted-foreground">
-                  {Math.round(calibrationData.weight_detection.confidence * 100)}% confident
-                </span>
-              )}
-            </div>
-          </Card>
-        )}
-
         {/* Selected Person Summary */}
         <Card className="p-4 bg-muted/50">
           <div className="flex items-center gap-4">
@@ -520,4 +468,3 @@ export function CalibrationStep({
 
   return null
 }
-
