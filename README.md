@@ -1,27 +1,25 @@
 # Exercise Tracker - Backend Pipeline
 
-This is a video-based exercise tracking system that analyzes movement form using pose estimation. We process videos frame-by-frame to track bar path, calculate velocities, and measure joint angles.
+Video-based exercise tracking system that analyzes movement form using pose estimation. We process videos frame-by-frame to track bar path, calculate velocities, and measure joint angles.
 
-All the core logic lives in `backend/src/services/trajectory_tracker.py` - that's where the magic happens.
+All core logic is in `backend/src/services/trajectory_tracker.py`.
 
 ---
 
 ## How It Works
 
-The pipeline is pretty straightforward: we extract frames from video, run pose estimation to find body keypoints, estimate where the bar is based on wrist positions, then calculate velocities and angles from the trajectory.
+The pipeline extracts frames from video, runs pose estimation to find body keypoints, estimates bar position from wrist positions, then calculates velocities and angles from the trajectory.
 
 ```
 Video → Pose Estimation → Bar Tracking → Velocity → Metrics
          (MediaPipe)      (wrist midpoint)  (dx/dt)
 ```
 
-Let me walk through each step:
-
 ---
 
 ## Step 1: Reading the Video
 
-We use OpenCV to read frames from the video file. Nothing fancy here - just extracting basic properties like frame rate and dimensions.
+We use OpenCV to read frames from the video file and extract basic properties like frame rate and dimensions.
 
 **Code:** `trajectory_tracker.py` lines 347-358
 
@@ -40,7 +38,7 @@ duration = total_frames / fps if fps > 0 else 0
 
 ## Step 2: Finding Body Keypoints
 
-This is where MediaPipe comes in. We feed each frame to their pose estimation model, and it spits back 33 body landmarks - things like shoulders, elbows, wrists, etc.
+We use MediaPipe pose estimation to extract 33 body landmarks from each frame: shoulders, elbows, wrists, etc.
 
 **Code:** `trajectory_tracker.py` line 392, calls `pose_estimator.py`
 
@@ -57,18 +55,18 @@ pose_landmarks = pose_estimator.estimate(frame, roi=tracking_roi)
 # }
 ```
 
-The important landmarks for us are:
-- **15, 16:** Left and right wrists (we use these to find the bar)
+Important landmarks:
+- **15, 16:** Left and right wrists (used to find bar position)
 - **13, 14:** Elbows (for angle calculations)
-- **11, 12:** Shoulders (also for angles)
+- **11, 12:** Shoulders (for angle calculations)
 
-**About that Z coordinate:** MediaPipe gives us a depth estimate, but it's not a real measurement. They trained a model on thousands of human poses, and it guesses depth based on body proportions and perspective. The Z value is relative to the hip center, with smaller values meaning closer to the camera. It's useful for relative comparisons, but don't trust it for absolute measurements - single cameras just can't measure depth directly.
+**Z-axis estimation:** MediaPipe provides a depth estimate based on a statistical model trained on human pose data. The Z value is relative to the hip center, with smaller values meaning closer to the camera. This is an estimate, not a measurement - single cameras cannot directly measure depth.
 
 ---
 
 ## Step 3: Estimating Bar Position
 
-Here's the tricky part. We don't actually detect the barbell directly - instead, we estimate where it is based on wrist positions. The key insight is that when you're gripping a bar, your hands are slightly above your wrists (in your palms).
+We use wrist positions to estimate barbell location. The bar is gripped in the palms, which are slightly above the wrists. We extend 18% past the wrist along the forearm direction to estimate grip position.
 
 **Code:** `barbell_detector.py` lines 161-180
 
@@ -93,7 +91,7 @@ def _estimate_grip_from_forearm(
     return (grip_x, grip_y)
 ```
 
-Then we take the midpoint of both grips to get the bar center:
+We calculate the midpoint of both grip positions to get the bar center:
 
 **Code:** `barbell_detector.py` lines 220-230
 
@@ -107,7 +105,7 @@ center_x = (left_grip[0] + right_grip[0]) // 2
 center_y = (left_grip[1] + right_grip[1]) // 2
 ```
 
-Since pose detection can be noisy, we smooth things out with an exponential moving average. We also reject any sudden jumps (like if the bar position moves more than 500 pixels between frames - that's probably a detection error).
+We smooth the position using exponential moving average and reject jumps larger than 500 pixels (likely detection errors).
 
 **Code:** `barbell_detector.py` lines 106-109
 
@@ -122,7 +120,7 @@ self.smoothed_position = (smooth_x, smooth_y)
 
 ## Step 4: Calculating Velocity
 
-Now that we have the bar position over time, we can calculate how fast it's moving. This is just basic physics - velocity is change in position divided by change in time.
+We calculate velocity from frame-to-frame position changes: velocity = change in position / change in time.
 
 **Code:** `trajectory_tracker.py` lines 174-191
 
@@ -147,13 +145,13 @@ for i in range(1, len(sorted_traj)):
     })
 ```
 
-One thing to watch out for: in image coordinates, Y increases downward (y=0 is at the top). So when the bar moves up, dy is negative. We flip the sign so positive velocities mean upward movement, which is more intuitive.
+In image coordinates, Y increases downward (y=0 at top). When the bar moves up, dy is negative. We flip the sign so positive velocities represent upward movement.
 
 ---
 
 ## Step 5: Joint Angles
 
-We calculate joint angles using the dot product formula. Given three points (like shoulder, elbow, wrist), we can find the angle at the middle point.
+We calculate joint angles using the dot product formula. Given three points (shoulder, elbow, wrist), we find the angle at the middle point.
 
 **Code:** `trajectory_tracker.py` lines 69-94
 
@@ -192,7 +190,7 @@ right = calculate_angle(pose_landmarks[12], pose_landmarks[14], pose_landmarks[1
 
 ## Step 6: Counting Reps
 
-We detect reps by tracking when the bar crosses the midpoint of its vertical range going upward. It's a simple state machine - we check if the bar was below the midpoint and is now above it.
+We detect reps by tracking when the bar crosses the midpoint of its vertical range going upward. We check if the bar was below the midpoint and is now above it.
 
 **Code:** `trajectory_tracker.py` lines 221-243
 
@@ -225,7 +223,7 @@ def _count_reps(y_positions: List[float], displacement: float) -> int:
 
 ## Step 7: Final Metrics
 
-At the end, we aggregate everything into a nice summary:
+We aggregate all results into summary metrics:
 
 **Code:** `trajectory_tracker.py` lines 209-218
 
@@ -244,18 +242,18 @@ return {
 
 ---
 
-## What We Can't Do (Yet)
+## Limitations
 
-Since we're using a single camera, there are some fundamental limitations:
+Single camera setup has fundamental limitations:
 
-| Issue | What This Means |
-|-------|----------------|
+| Issue | Impact |
+|-------|--------|
 | **No true depth** | Z-axis is estimated, not measured |
-| **Pixel units only** | Can't get real-world m/s without calibration |
+| **Pixel units only** | Cannot get real-world m/s without calibration |
 | **Camera angle matters** | Works best when camera is perpendicular to movement |
 | **Occlusion breaks tracking** | If wrists are hidden, we lose the bar |
 
-For more details on limitations and what we're planning to add, check out `backend/CAPABILITIES.md`.
+See `backend/CAPABILITIES.md` for detailed limitations and roadmap.
 
 ---
 
@@ -271,7 +269,7 @@ backend/src/services/
 
 ---
 
-## Running It
+## Running
 
 ```bash
 cd backend

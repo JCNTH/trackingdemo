@@ -59,7 +59,7 @@ The landmarks we get include:
 
 ### 2. 2D Bar Tracking
 
-Since we can't directly detect the barbell (it's too thin and often occluded), we estimate its position from wrist landmarks. The key insight is that when gripping a bar, your hands are slightly above your wrists - about 18% of the forearm length past the wrist joint.
+We estimate barbell position from wrist landmarks. When gripping a bar, hands are positioned above the wrists - approximately 18% of the forearm length past the wrist joint.
 
 ```
 ✅ Bar position from wrist midpoint
@@ -76,11 +76,11 @@ How it works:
 4. Apply exponential moving average smoothing to reduce noise
 5. Reject any jumps larger than 500px as outliers (probably detection errors)
 
-This approach works pretty well for bench press, but it's not perfect. If wrists are occluded or the grip is unusual, we fall back to simpler methods.
+This approach works well for bench press. If wrists are occluded or the grip is unusual, we fall back to simpler methods.
 
 ### 3. 2D Velocity Metrics
 
-We calculate velocity the straightforward way - change in position divided by change in time. Since we're working in pixels, the units are pixels per second.
+We calculate velocity as change in position divided by change in time. Units are pixels per second since we work in pixel coordinates.
 
 ```
 ✅ Frame-to-frame velocity (pixels/second)
@@ -97,11 +97,11 @@ dt = frame_diff / fps
 velocity = sqrt(dx² + dy²) / dt  # px/s
 ```
 
-One gotcha: image coordinates have Y increasing downward (y=0 is at the top), so when the bar moves up, dy is negative. We flip the sign (`vertical_velocity = -dy/dt`) so positive values mean upward movement, which is more intuitive.
+Image coordinates have Y increasing downward (y=0 at top). When the bar moves up, dy is negative. We flip the sign (`vertical_velocity = -dy/dt`) so positive values represent upward movement.
 
 ### 4. Joint Angle Calculation
 
-We calculate joint angles using the dot product formula. Given three points (like shoulder, elbow, wrist), we can find the angle at the middle point.
+We calculate joint angles using the dot product formula. Given three points (shoulder, elbow, wrist), we find the angle at the middle point.
 
 ```
 ✅ Elbow angles (shoulder→elbow→wrist)
@@ -129,7 +129,7 @@ We detect reps by tracking when the bar crosses the midpoint of its vertical ran
 ✅ Works for repetitive movements
 ```
 
-This works reasonably well for exercises with clear up/down cycles, but it can get confused if the movement is irregular or if there are pauses.
+This works for exercises with clear up/down cycles. It can fail if movement is irregular or includes pauses.
 
 ### 6. Form Analysis (Rule-Based)
 
@@ -141,7 +141,7 @@ We have a basic form scoring system that looks at bar path quality and joint sym
 ✅ Basic form recommendations
 ```
 
-The scoring is rule-based (not ML), so it's transparent but limited. A good bar path has verticality > 0.7, and good symmetry means elbow asymmetry < 10°.
+Scoring is rule-based (not ML), making it transparent but limited. Good bar path has verticality > 0.7. Good symmetry means elbow asymmetry < 10°.
 
 ---
 
@@ -151,7 +151,7 @@ Here are the limitations we're working with:
 
 ### 1. No True 3D Reconstruction
 
-This is the big one. Single cameras capture 2D images, and depth information is lost in that projection. It's like trying to figure out how far away something is from a single photo - you can make educated guesses based on size and perspective, but you can't actually measure it.
+Single cameras capture 2D images, and depth information is lost in that projection. Depth can be estimated from size and perspective cues, but cannot be directly measured.
 
 ```
 ❌ FUNDAMENTAL LIMITATION: Single camera = no depth
@@ -168,7 +168,7 @@ This is the big one. Single cameras capture 2D images, and depth information is 
 - We can't get real-world velocities (m/s) without calibration
 - Movement parallel to the camera is invisible
 
-Think of it like this: if someone moves the bar directly toward or away from the camera, we can't see that movement. We only see movement perpendicular to the camera.
+Movement directly toward or away from the camera is invisible. We only detect movement perpendicular to the camera.
 
 ### 2. No Real-World Units
 
@@ -191,7 +191,7 @@ scale = bar_length_cm / bar_length_pixels  # cm/px
 velocity_cms = velocity_pxs * scale
 ```
 
-This is actually pretty doable - we just haven't implemented it yet.
+This is feasible but not yet implemented.
 
 ### 3. No Center of Mass Estimation
 
@@ -205,7 +205,7 @@ Right now, we're using wrist midpoint as a proxy for bar position. But we're not
 **What we're doing:** Using wrist midpoint as proxy  
 **What we need:** Actual object segmentation to get real boundaries and calculate geometric center
 
-This is where SAM3 (Segment Anything Model) would come in handy. We have the model in the repo (`sam3/`), but haven't integrated it yet.
+SAM3 (Segment Anything Model) would enable this. The model exists in the repo (`sam3/`) but is not yet integrated.
 
 ### 4. No Contact Point Detection
 
@@ -243,7 +243,7 @@ When body parts get hidden (like when the bar blocks the wrists), tracking fails
 ❌ No prediction during occlusion
 ```
 
-This is a common problem in computer vision. Some approaches use Kalman filters or LSTM networks to predict during occlusion, but we haven't implemented that.
+This is a common problem in computer vision. Kalman filters or LSTM networks can predict during occlusion, but we have not implemented this.
 
 ### 7. Camera Angle Dependency
 
