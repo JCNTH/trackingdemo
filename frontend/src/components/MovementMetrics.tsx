@@ -105,8 +105,6 @@ interface MovementMetricsProps {
   jointAngles?: JointAngles[]
   trackingStats?: TrackingStats
   formAnalysis?: FormAnalysis
-  fps?: number
-  frameHeight?: number
 }
 
 function MetricCard({ 
@@ -207,8 +205,6 @@ export function MovementMetrics({
   jointAngles,
   trackingStats,
   formAnalysis,
-  fps = 30,
-  frameHeight = 720,
 }: MovementMetricsProps) {
   const summary = useMemo(() => {
     if (!barPath || barPath.length === 0) {
@@ -229,18 +225,16 @@ export function MovementMetrics({
       }
     }
 
-    const pixelsPerCm = frameHeight / 100
-    const displacementCm = velocityMetrics?.vertical_displacement 
-      ? velocityMetrics.vertical_displacement / pixelsPerCm 
-      : null
+    // Raw pixel values - no conversion to real-world units (no calibration)
+    const displacementPx = velocityMetrics?.vertical_displacement ?? null
 
     return {
       totalFrames: barPath.length,
       avgElbowAngle,
       minElbowAngle,
-      displacementCm,
+      displacementPx,
     }
-  }, [barPath, jointAngles, velocityMetrics, frameHeight])
+  }, [barPath, jointAngles, velocityMetrics])
 
   if (!summary) {
     return (
@@ -271,18 +265,18 @@ export function MovementMetrics({
               <MetricCard
                 icon={TrendingUp}
                 label="Peak Velocity"
-                value={(velocityMetrics.peak_concentric_velocity / (frameHeight / 100)).toFixed(1)}
-                unit="cm/s"
+                value={velocityMetrics.peak_concentric_velocity.toFixed(0)}
+                unit="px/s"
                 color="text-green-500"
               />
             )}
             
-            {summary.displacementCm !== null && (
+            {summary.displacementPx !== null && (
               <MetricCard
                 icon={ArrowUpDown}
                 label="Displacement"
-                value={summary.displacementCm.toFixed(1)}
-                unit="cm"
+                value={summary.displacementPx.toFixed(0)}
+                unit="px"
                 color="text-blue-500"
               />
             )}

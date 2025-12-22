@@ -12,12 +12,11 @@ import { TrajectoryCanvas } from '@/components/TrajectoryCanvas'
 import { DataExport } from '@/components/DataExport'
 import { CalibrationStep } from '@/components/CalibrationStep'
 import { MovementMetrics } from '@/components/MovementMetrics'
-import { WeightDetectionModal } from '@/components/WeightDetectionModal'
 import { BarPathChart } from '@/components/BarPathChart'
 import { 
   ArrowLeft, Play, Loader2, 
   CheckCircle2, AlertCircle, Clock, RefreshCw, Settings2,
-  Activity, Scale, Sparkles
+  Activity
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
 import { apiClient } from '@/lib/api'
@@ -28,7 +27,6 @@ export default function VideoDetailPage({ params }: { params: Promise<{ id: stri
   const queryClient = useQueryClient()
   const [currentFrame, setCurrentFrame] = useState(0)
   const [showCalibration, setShowCalibration] = useState(false)
-  const [showWeightDetection, setShowWeightDetection] = useState(false)
   
   // Track previous status to detect when processing completes
   const prevStatusRef = useRef<string | undefined>(undefined)
@@ -192,11 +190,6 @@ export default function VideoDetailPage({ params }: { params: Promise<{ id: stri
 
   const handleCalibrationComplete = (selectedPersonBbox?: [number, number, number, number]) => {
     processVideo.mutate(selectedPersonBbox)
-  }
-
-  const handleWeightDetected = (weight: number, unit: string) => {
-    toast.success(`Detected weight: ${weight} ${unit}`)
-    queryClient.invalidateQueries({ queryKey: ['video', id] })
   }
 
   const getVideoUrl = () => {
@@ -427,51 +420,6 @@ export default function VideoDetailPage({ params }: { params: Promise<{ id: stri
               </dl>
             </Card>
 
-            {/* Weight Detection */}
-            <Card className="p-4">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-medium flex items-center gap-1.5">
-                  <Scale className="h-4 w-4 text-muted-foreground" />
-                  Weight
-                </h3>
-                {!video.detected_weight && video.status !== 'pending' && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 text-xs"
-                    onClick={() => setShowWeightDetection(true)}
-                  >
-                    <Sparkles className="h-3 w-3 mr-1" />
-                    Detect
-                  </Button>
-                )}
-              </div>
-              {video.detected_weight ? (
-                <div className="flex items-baseline gap-1">
-                  <span className="text-2xl font-semibold tabular-nums">
-                    {video.detected_weight}
-                  </span>
-                  <span className="text-sm text-muted-foreground">
-                    {video.weight_unit || 'lbs'}
-                  </span>
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  {video.status === 'pending' 
-                    ? 'Process video first to detect weight' 
-                    : 'Click detect to identify weight plates using AI'}
-                </p>
-              )}
-            </Card>
-
-            {/* Weight Detection Modal */}
-            <WeightDetectionModal
-              open={showWeightDetection}
-              onOpenChange={setShowWeightDetection}
-              videoId={id}
-              onDetectionComplete={handleWeightDetected}
-            />
-
             {/* Results Tabs */}
             {video.status === 'completed' && (
               <Tabs defaultValue="analysis" className="w-full">
@@ -492,8 +440,6 @@ export default function VideoDetailPage({ params }: { params: Promise<{ id: stri
                     jointAngles={trajectoryData?.joint_angles}
                     trackingStats={trajectoryData?.tracking_stats}
                     formAnalysis={trajectoryData?.form_analysis}
-                    fps={video.fps || 30}
-                    frameHeight={video.height || 720}
                   />
                 </TabsContent>
 

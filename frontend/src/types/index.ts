@@ -1,11 +1,5 @@
 // Exercise types supported by the system
-export type ExerciseType = 
-  | 'bench_press' 
-  | 'squat' 
-  | 'deadlift' 
-  | 'overhead_press' 
-  | 'row' 
-  | 'other'
+export type ExerciseType = 'bench_press'
 
 export interface Video {
   id: string
