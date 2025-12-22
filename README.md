@@ -1,23 +1,29 @@
 # Exercise Tracker - Backend Pipeline
 
-Video-based exercise tracking using pose estimation to calculate bar path, velocity, and joint angles.
+This is a video-based exercise tracking system that analyzes movement form using pose estimation. We process videos frame-by-frame to track bar path, calculate velocities, and measure joint angles.
 
-**Main file:** `backend/src/services/trajectory_tracker.py` - contains all core pipeline logic.
+All the core logic lives in `backend/src/services/trajectory_tracker.py` - that's where the magic happens.
 
 ---
 
-## Pipeline Overview
+## How It Works
+
+The pipeline is pretty straightforward: we extract frames from video, run pose estimation to find body keypoints, estimate where the bar is based on wrist positions, then calculate velocities and angles from the trajectory.
 
 ```
 Video → Pose Estimation → Bar Tracking → Velocity → Metrics
          (MediaPipe)      (wrist midpoint)  (dx/dt)
 ```
 
+Let me walk through each step:
+
 ---
 
-## Step 1: Frame Extraction
+## Step 1: Reading the Video
 
-**File:** `trajectory_tracker.py` lines 347-358
+We use OpenCV to read frames from the video file. Nothing fancy here - just extracting basic properties like frame rate and dimensions.
+
+**Code:** `trajectory_tracker.py` lines 347-358
 
 ```python
 cap = cv2.VideoCapture(video_path)
@@ -32,9 +38,11 @@ duration = total_frames / fps if fps > 0 else 0
 
 ---
 
-## Step 2: Pose Estimation
+## Step 2: Finding Body Keypoints
 
-**File:** `trajectory_tracker.py` line 392, calls `pose_estimator.py`
+This is where MediaPipe comes in. We feed each frame to their pose estimation model, and it spits back 33 body landmarks - things like shoulders, elbows, wrists, etc.
+
+**Code:** `trajectory_tracker.py` line 392, calls `pose_estimator.py`
 
 ```python
 # Returns 33 landmarks in NORMALIZED [0-1] coordinates
@@ -49,19 +57,20 @@ pose_landmarks = pose_estimator.estimate(frame, roi=tracking_roi)
 # }
 ```
 
-**Key landmarks:** 15, 16 = wrists | 13, 14 = elbows | 11, 12 = shoulders
+The important landmarks for us are:
+- **15, 16:** Left and right wrists (we use these to find the bar)
+- **13, 14:** Elbows (for angle calculations)
+- **11, 12:** Shoulders (also for angles)
 
-**Z-axis estimation:** MediaPipe estimates depth using a statistical model trained on human pose data. The Z value is relative to the hip center (origin), where:
-- Smaller Z = closer to camera
-- Larger Z = farther from camera
-- Units are approximate meters, but accuracy is limited without true depth measurement
-- This is an **estimate**, not a measurement, because single-camera systems cannot directly measure depth
+**About that Z coordinate:** MediaPipe gives us a depth estimate, but it's not a real measurement. They trained a model on thousands of human poses, and it guesses depth based on body proportions and perspective. The Z value is relative to the hip center, with smaller values meaning closer to the camera. It's useful for relative comparisons, but don't trust it for absolute measurements - single cameras just can't measure depth directly.
 
 ---
 
-## Step 3: Bar Position Estimation
+## Step 3: Estimating Bar Position
 
-**File:** `barbell_detector.py` lines 161-180
+Here's the tricky part. We don't actually detect the barbell directly - instead, we estimate where it is based on wrist positions. The key insight is that when you're gripping a bar, your hands are slightly above your wrists (in your palms).
+
+**Code:** `barbell_detector.py` lines 161-180
 
 ```python
 def _estimate_grip_from_forearm(
@@ -84,7 +93,9 @@ def _estimate_grip_from_forearm(
     return (grip_x, grip_y)
 ```
 
-**Bar center calculation:** `barbell_detector.py` lines 220-230
+Then we take the midpoint of both grips to get the bar center:
+
+**Code:** `barbell_detector.py` lines 220-230
 
 ```python
 # Best case: Both forearms visible
@@ -96,7 +107,9 @@ center_x = (left_grip[0] + right_grip[0]) // 2
 center_y = (left_grip[1] + right_grip[1]) // 2
 ```
 
-**Smoothing (EMA):** `barbell_detector.py` lines 106-109
+Since pose detection can be noisy, we smooth things out with an exponential moving average. We also reject any sudden jumps (like if the bar position moves more than 500 pixels between frames - that's probably a detection error).
+
+**Code:** `barbell_detector.py` lines 106-109
 
 ```python
 # Exponential moving average (α = 0.5)
@@ -107,9 +120,11 @@ self.smoothed_position = (smooth_x, smooth_y)
 
 ---
 
-## Step 4: Velocity Calculation
+## Step 4: Calculating Velocity
 
-**File:** `trajectory_tracker.py` lines 174-191
+Now that we have the bar position over time, we can calculate how fast it's moving. This is just basic physics - velocity is change in position divided by change in time.
+
+**Code:** `trajectory_tracker.py` lines 174-191
 
 ```python
 # Calculate frame-to-frame velocities
@@ -132,11 +147,15 @@ for i in range(1, len(sorted_traj)):
     })
 ```
 
+One thing to watch out for: in image coordinates, Y increases downward (y=0 is at the top). So when the bar moves up, dy is negative. We flip the sign so positive velocities mean upward movement, which is more intuitive.
+
 ---
 
-## Step 5: Joint Angle Calculation
+## Step 5: Joint Angles
 
-**File:** `trajectory_tracker.py` lines 69-94
+We calculate joint angles using the dot product formula. Given three points (like shoulder, elbow, wrist), we can find the angle at the middle point.
+
+**Code:** `trajectory_tracker.py` lines 69-94
 
 ```python
 def calculate_angle(p1: Dict, p2: Dict, p3: Dict) -> Optional[float]:
@@ -149,7 +168,7 @@ def calculate_angle(p1: Dict, p2: Dict, p3: Dict) -> Optional[float]:
         return None
     
     # Create vectors from p2 to p1 and p2 to p3
-    v1 = np.array([p1["x"] - p2["x"], p1["y"] - p2["y"]])
+    v1 = np.array([p1["x"] - p2["x"], p1["y"] - p2["y"])
     v2 = np.array([p3["x"] - p2["x"], p3["y"] - p2["y"])
     
     # Calculate angle using dot product
@@ -159,7 +178,9 @@ def calculate_angle(p1: Dict, p2: Dict, p3: Dict) -> Optional[float]:
     return float(np.degrees(np.arccos(cos_angle)))
 ```
 
-**Elbow angle:** `trajectory_tracker.py` lines 114-116
+For elbow angles, we use shoulder → elbow → wrist:
+
+**Code:** `trajectory_tracker.py` lines 114-116
 
 ```python
 # Elbow angles: shoulder → elbow → wrist
@@ -169,9 +190,11 @@ right = calculate_angle(pose_landmarks[12], pose_landmarks[14], pose_landmarks[1
 
 ---
 
-## Step 6: Rep Counting
+## Step 6: Counting Reps
 
-**File:** `trajectory_tracker.py` lines 221-243
+We detect reps by tracking when the bar crosses the midpoint of its vertical range going upward. It's a simple state machine - we check if the bar was below the midpoint and is now above it.
+
+**Code:** `trajectory_tracker.py` lines 221-243
 
 ```python
 def _count_reps(y_positions: List[float], displacement: float) -> int:
@@ -200,9 +223,11 @@ def _count_reps(y_positions: List[float], displacement: float) -> int:
 
 ---
 
-## Step 7: Output Metrics
+## Step 7: Final Metrics
 
-**File:** `trajectory_tracker.py` lines 209-218
+At the end, we aggregate everything into a nice summary:
+
+**Code:** `trajectory_tracker.py` lines 209-218
 
 ```python
 return {
@@ -219,20 +244,22 @@ return {
 
 ---
 
-## Limitations (Single Camera)
+## What We Can't Do (Yet)
 
-| Issue | Impact |
-|-------|--------|
-| **No depth** | Z-axis estimated, not measured |
-| **Pixel units** | No real-world m/s without calibration |
-| **Camera angle** | Best perpendicular to movement |
-| **Occlusion** | Tracking lost when body parts hidden |
+Since we're using a single camera, there are some fundamental limitations:
 
-See `backend/CAPABILITIES.md` for full limitations and roadmap.
+| Issue | What This Means |
+|-------|----------------|
+| **No true depth** | Z-axis is estimated, not measured |
+| **Pixel units only** | Can't get real-world m/s without calibration |
+| **Camera angle matters** | Works best when camera is perpendicular to movement |
+| **Occlusion breaks tracking** | If wrists are hidden, we lose the bar |
+
+For more details on limitations and what we're planning to add, check out `backend/CAPABILITIES.md`.
 
 ---
 
-## Files
+## Project Structure
 
 ```
 backend/src/services/
@@ -244,7 +271,7 @@ backend/src/services/
 
 ---
 
-## Run
+## Running It
 
 ```bash
 cd backend
