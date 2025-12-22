@@ -19,153 +19,100 @@ Video → Pose Estimation → Bar Tracking → Velocity → Metrics
 
 **Normalized [0-1]:** MediaPipe output
 - Origin: top-left (0, 0)
-- Range: x, y ∈ [0, 1]
-- Used for: pose landmarks
+- Conversion: `pixel_x = normalized_x × frame_width`
 
 **Pixel coordinates:** Image space
 - Origin: top-left (0, 0)
-- Range: x ∈ [0, width], y ∈ [0, height]
+- Y increases downward (y=0 at top)
 - Used for: bar tracking, velocity calculations
-- **Note:** Y increases downward (y=0 at top)
-
-**Conversion:** `pixel_x = normalized_x × frame_width`
 
 ---
 
 ## Step 1: Frame Extraction
 
-OpenCV reads frames and extracts video properties.
+Extract video properties.
 
 **Code:** `trajectory_tracker.py` lines 347-358
 
 ```python
 cap = cv2.VideoCapture(video_path)
-
 fps = cap.get(cv2.CAP_PROP_FPS)
 width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
 height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-duration = total_frames / fps if fps > 0 else 0
 ```
-
-**Output:** Frame dimensions in pixels (e.g., 1920×1080)
 
 ---
 
 ## Step 2: Pose Estimation
 
-MediaPipe extracts 33 body landmarks per frame. Output is normalized coordinates [0-1].
+MediaPipe extracts 33 body landmarks. Output: normalized [0-1] coordinates.
 
-**Code:** `trajectory_tracker.py` line 392, calls `pose_estimator.py`
+**Code:** `trajectory_tracker.py` line 392
 
 ```python
 pose_landmarks = pose_estimator.estimate(frame, roi=tracking_roi)
-
 # Each landmark: {x, y, z, visibility}
 # x, y: normalized [0-1]
 # z: relative depth (estimated)
-# visibility: confidence [0-1]
 ```
 
-**Output:** Landmarks in normalized [0-1] coordinates
+Key landmarks: 15,16 = wrists | 13,14 = elbows | 11,12 = shoulders
 
-**Example:**
-```python
-landmark = {
-    "x": 0.45,      # 45% from left edge
-    "y": 0.62,      # 62% from top edge
-    "z": -0.12,     # estimated depth
-    "visibility": 0.95
-}
-```
-
-Key landmarks:
-- **15, 16:** Wrists (bar position)
-- **13, 14:** Elbows (angles)
-- **11, 12:** Shoulders (angles)
-
-**Z-axis:** MediaPipe estimates depth from a statistical model. Z is relative to hip center, smaller = closer. This is an estimate, not a measurement - single cameras cannot measure depth.
+**Z-axis:** Estimated from statistical model, relative to hip center. Not a true measurement.
 
 ---
 
 ## Step 3: Bar Position Estimation
 
-### Step 3a: Convert Normalized → Pixel Coordinates
-
-Landmarks are converted from normalized [0-1] to pixel coordinates.
+### 3a: Normalized → Pixel Conversion
 
 **Code:** `barbell_detector.py` lines 207-210
 
 ```python
-# Convert normalized [0-1] to pixel coordinates
 left_wrist_px = (int(left_wrist["x"] * frame_width), int(left_wrist["y"] * frame_height))
 right_wrist_px = (int(right_wrist["x"] * frame_width), int(right_wrist["y"] * frame_height))
-left_elbow_px = (int(left_elbow["x"] * frame_width), int(left_elbow["y"] * frame_height))
-right_elbow_px = (int(right_elbow["x"] * frame_width), int(right_elbow["y"] * frame_height))
 ```
 
-**Example:** If frame is 1920×1080 and wrist is at (0.45, 0.62):
-- `pixel_x = 0.45 × 1920 = 864 pixels`
-- `pixel_y = 0.62 × 1080 = 670 pixels`
+### 3b: Estimate Grip Position
 
-### Step 3b: Estimate Grip Position
-
-Bar is gripped ~18% past wrist along forearm direction.
+Extend 18% past wrist along forearm direction.
 
 **Code:** `barbell_detector.py` lines 161-180
 
 ```python
 def _estimate_grip_from_forearm(elbow_px, wrist_px):
-    # Forearm vector (elbow → wrist)
-    forearm_dx = wrist_px[0] - elbow_px[0]  # pixels
-    forearm_dy = wrist_px[1] - elbow_px[1]  # pixels
-    
-    # Extend 18% past wrist
-    grip_x = wrist_px[0] + int(forearm_dx * 0.18)  # pixels
-    grip_y = wrist_px[1] + int(forearm_dy * 0.18)  # pixels
+    forearm_dx = wrist_px[0] - elbow_px[0]
+    forearm_dy = wrist_px[1] - elbow_px[1]
+    grip_x = wrist_px[0] + int(forearm_dx * 0.18)
+    grip_y = wrist_px[1] + int(forearm_dy * 0.18)
     return (grip_x, grip_y)
 ```
 
-**Output:** Grip positions in pixel coordinates
+### 3c: Bar Center
 
-### Step 3c: Calculate Bar Center
-
-Bar center is midpoint of both grip positions.
-
-**Code:** `barbell_detector.py` lines 220-230
+**Code:** `barbell_detector.py` lines 226-227
 
 ```python
-left_grip = _estimate_grip_from_forearm(left_elbow_px, left_wrist_px)
-right_grip = _estimate_grip_from_forearm(right_elbow_px, right_wrist_px)
-
-center_x = (left_grip[0] + right_grip[0]) // 2  # pixels
-center_y = (left_grip[1] + right_grip[1]) // 2  # pixels
+center_x = (left_grip[0] + right_grip[0]) // 2
+center_y = (left_grip[1] + right_grip[1]) // 2
 ```
 
-**Output:** Bar center `(center_x, center_y)` in pixel coordinates
+### 3d: Smoothing
 
-### Step 3d: Smoothing
-
-Exponential moving average smooths position. Jumps >500px are rejected.
+EMA (α=0.5). Reject jumps >500px.
 
 **Code:** `barbell_detector.py` lines 106-109
 
 ```python
-dx = new_x - smoothed_x  # pixels
-dy = new_y - smoothed_y  # pixels
-smooth_x = smoothed_x + 0.5 * dx  # pixels
-smooth_y = smoothed_y + 0.5 * dy  # pixels
+smooth_x = smoothed_x + 0.5 * (new_x - smoothed_x)
+smooth_y = smoothed_y + 0.5 * (new_y - smoothed_y)
 ```
-
-**Output:** Smoothed bar position in pixel coordinates
 
 ---
 
 ## Step 4: Velocity Calculation
 
-### Step 4a: Position Change (Pixels)
-
-Calculate change in position between consecutive frames.
+### 4a: Position Change
 
 **Code:** `trajectory_tracker.py` lines 176-177
 
@@ -174,13 +121,7 @@ dx = curr["x"] - prev["x"]  # pixels
 dy = curr["y"] - prev["y"]  # pixels
 ```
 
-**Example:** If bar moves from (864, 670) to (865, 665):
-- `dx = 865 - 864 = 1 pixel`
-- `dy = 665 - 670 = -5 pixels` (negative = moving up)
-
-### Step 4b: Time Change (Seconds)
-
-Calculate time difference between frames.
+### 4b: Time Change
 
 **Code:** `trajectory_tracker.py` line 172
 
@@ -188,54 +129,34 @@ Calculate time difference between frames.
 dt = (curr["frame"] - prev["frame"]) / fps  # seconds
 ```
 
-**Example:** If fps = 30:
-- `dt = 1 / 30 = 0.033 seconds`
-
-### Step 4c: Velocity (Pixels/Second)
-
-Velocity = change in position / change in time.
+### 4c: Velocity
 
 **Code:** `trajectory_tracker.py` lines 181-184
 
 ```python
 vx = dx / dt  # pixels/second
 vy = dy / dt  # pixels/second
-speed = math.sqrt(dx**2 + dy**2) / dt  # pixels/second
-vertical_velocity = -dy / dt  # pixels/second (positive = upward)
+speed = math.sqrt(dx**2 + dy**2) / dt
+vertical_velocity = -dy / dt  # positive = upward
 ```
 
-**Example:** With dx=1, dy=-5, dt=0.033:
-- `vx = 1 / 0.033 = 30 px/s`
-- `vy = -5 / 0.033 = -152 px/s`
-- `vertical_velocity = -(-5) / 0.033 = 152 px/s` (positive = upward)
-
-**Important:** 
-- Velocity is in **pixels/second**, NOT cm/s or m/s
-- No conversion to real-world units occurs
-- Y-axis is inverted: negative dy = upward movement
+**Units:** Pixels/second (NOT cm/s or m/s). No conversion to real-world units.
 
 ---
 
 ## Step 5: Joint Angles
 
-Angles calculated from three points using dot product. Input is normalized coordinates [0-1].
+Dot product formula. Input: normalized [0-1], Output: degrees.
 
 **Code:** `trajectory_tracker.py` lines 69-94
 
 ```python
 def calculate_angle(p1, p2, p3):
-    # Vectors in normalized space
     v1 = np.array([p1["x"] - p2["x"], p1["y"] - p2["y"]])
     v2 = np.array([p3["x"] - p2["x"], p3["y"] - p2["y"]])
-    
-    # Dot product formula
     cos_angle = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
-    angle = np.degrees(np.arccos(np.clip(cos_angle, -1.0, 1.0)))
-    return angle  # degrees
+    return np.degrees(np.arccos(np.clip(cos_angle, -1.0, 1.0)))
 ```
-
-**Input:** Normalized coordinates [0-1]  
-**Output:** Angle in degrees
 
 Elbow angle: shoulder → elbow → wrist
 
@@ -250,13 +171,13 @@ right = calculate_angle(pose_landmarks[12], pose_landmarks[14], pose_landmarks[1
 
 ## Step 6: Rep Counting
 
-Counts midpoint crossings going upward. Uses pixel Y coordinates.
+Tracks midpoint crossings going upward.
 
 **Code:** `trajectory_tracker.py` lines 221-243
 
 ```python
 def _count_reps(y_positions, displacement):
-    mid_y = (min(y_positions) + max(y_positions)) / 2  # pixels
+    mid_y = (min(y_positions) + max(y_positions)) / 2
     was_below = y_positions[0] > mid_y
     rep_count = 0
     
@@ -265,18 +186,12 @@ def _count_reps(y_positions, displacement):
         if was_below and not is_below:  # Crossed midpoint going up
             rep_count += 1
         was_below = is_below
-    
     return rep_count
 ```
-
-**Input:** Y positions in pixels  
-**Output:** Rep count (integer)
 
 ---
 
 ## Step 7: Output Metrics
-
-All metrics are in pixel units or derived from pixel calculations.
 
 **Code:** `trajectory_tracker.py` lines 203-211
 
@@ -287,30 +202,23 @@ All metrics are in pixel units or derived from pixel calculations.
     "average_speed": sum(speeds) / len(speeds),         # px/s
     "vertical_displacement": max(y) - min(y),            # px
     "horizontal_deviation": max(x) - min(x),             # px
-    "path_verticality": 1.0 - (x_deviation / y_displacement),  # 0-1
-    "estimated_reps": rep_count,                          # count
+    "path_verticality": 1.0 - (x_deviation / y_displacement),
+    "estimated_reps": rep_count,
 }
 ```
 
-**Units:**
-- Velocities: **pixels/second** (NOT cm/s or m/s)
-- Displacements: **pixels** (NOT cm or m)
-- Angles: **degrees**
-- Path verticality: **dimensionless** (0-1)
-
-**No conversion to real-world units:** All measurements remain in pixel space.
+**Units:** Velocities and displacements in pixels. Angles in degrees. No real-world unit conversion.
 
 ---
 
 ## Coordinate Conversion Summary
 
-| Step | Input Format | Conversion | Output Format |
-|------|--------------|------------|---------------|
-| Pose Estimation | Frame (BGR) | MediaPipe processing | Normalized [0-1] |
+| Step | Input | Conversion | Output |
+|------|-------|------------|--------|
+| Pose Estimation | Frame (BGR) | MediaPipe | Normalized [0-1] |
 | Bar Position | Normalized [0-1] | `× frame_width/height` | Pixel coordinates |
 | Velocity | Pixel coordinates | `dx/dt, dy/dt` | Pixels/second |
-| Joint Angles | Normalized [0-1] | Dot product (no conversion) | Degrees |
-| Metrics | Pixel/second | Aggregation | Pixel/second |
+| Joint Angles | Normalized [0-1] | Dot product | Degrees |
 
 ---
 
@@ -318,10 +226,10 @@ All metrics are in pixel units or derived from pixel calculations.
 
 | Issue | Impact | Why Overcome |
 |-------|--------|--------------|
-| **No true depth** | Z-axis estimated, not measured | Required for 3D biomechanics, accurate joint torques, and muscle force calculations |
-| **Pixel units** | No real-world m/s without calibration | Needed to compare velocities across videos, match research standards (VBT uses m/s), and provide actionable feedback |
-| **Camera angle** | Best perpendicular to movement | Limits deployment flexibility; multi-angle support enables analysis from any viewing position |
-| **Occlusion** | Tracking lost when wrists hidden | Breaks analysis during critical movement phases; needed for continuous biomechanics tracking |
+| **No true depth** | Z-axis estimated, not measured | Required for 3D biomechanics, joint torques, muscle forces |
+| **Pixel units** | No real-world m/s without calibration | Compare across videos, match research standards (VBT uses m/s) |
+| **Camera angle** | Best perpendicular to movement | Enable flexible deployment, multi-angle analysis |
+| **Occlusion** | Tracking lost when wrists hidden | Complete movement analysis, continuous biomechanics |
 
 See `backend/CAPABILITIES.md` for details.
 
