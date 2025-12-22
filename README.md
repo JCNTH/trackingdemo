@@ -247,9 +247,83 @@ backend/src/services/
 
 ---
 
-## Run
+## Quick Start
+
+### Prerequisites
+
+- Python 3.10+
+- Node.js 18+
+- Conda (recommended) or pip
+
+### 1. Backend Setup
 
 ```bash
+# Navigate to backend
 cd backend
-python run.py  # Port 8000
+
+# Create conda environment (recommended)
+conda env create -f environment.yml
+conda activate exercise-tracker
+
+# Or use pip
+pip install -r requirements.txt
+
+# Start backend server
+python run.py  # Runs on http://localhost:8000
+```
+
+### 2. Frontend Setup
+
+```bash
+# Navigate to frontend (new terminal)
+cd frontend
+
+# Install dependencies
+npm install
+
+# Start development server
+npm run dev  # Runs on http://localhost:3000
+```
+
+### 3. Environment Variables
+
+Create `frontend/.env.local`:
+
+```
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+
+Create `backend/.env`:
+
+```
+SUPABASE_URL=your_supabase_url
+SUPABASE_SERVICE_KEY=your_supabase_service_key
+```
+
+### 4. Open App
+
+Visit http://localhost:3000 in your browser.
+
+---
+
+## Project Structure
+
+```
+├── backend/
+│   ├── src/services/
+│   │   ├── trajectory_tracker.py   # Main pipeline
+│   │   ├── pose_estimator.py       # MediaPipe 33 keypoints
+│   │   ├── barbell_detector.py     # Bar position + smoothing
+│   │   └── form_analyzer.py        # Rule-based scoring
+│   ├── run.py                      # Server entry point
+│   └── environment.yml             # Conda dependencies
+├── frontend/
+│   ├── src/
+│   │   ├── app/                    # Next.js pages
+│   │   ├── components/             # React components
+│   │   └── lib/                    # API client, utils
+│   └── package.json                # npm dependencies
+└── README.md
 ```
