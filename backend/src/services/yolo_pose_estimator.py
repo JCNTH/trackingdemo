@@ -91,9 +91,6 @@ class YOLOPoseEstimator:
         """
         Detect all people in frame with pose landmarks using YOLO11s-pose.
         
-        This is a single-pass detection that finds all people AND their poses,
-        which is more efficient than MediaPipe's two-stage approach.
-        
         Args:
             frame: BGR image as numpy array
             

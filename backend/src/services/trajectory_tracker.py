@@ -134,13 +134,7 @@ def calculate_joint_angles(pose_landmarks: List[Dict]) -> Dict:
 def calculate_velocity_metrics(bar_trajectory: List[Dict], fps: float, frame_height: int) -> Dict:
     """
     Calculate velocity-based training (VBT) metrics from bar path.
-    
-    IMPORTANT - Y-AXIS IS INVERTED:
-        - In image coordinates, y=0 is TOP, y=height is BOTTOM
-        - Negative dy = bar moving UP (concentric/lifting)
-        - Positive dy = bar moving DOWN (eccentric/lowering)
-        - We output vertical_velocity with positive = upward
-    
+        
     Velocity formula:
         dx = curr.x - prev.x         (pixels)
         dy = curr.y - prev.y         (pixels)  
