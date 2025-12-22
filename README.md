@@ -224,14 +224,14 @@ def _count_reps(y_positions, displacement):
 
 ## Limitations
 
-| Issue | Impact | Why Overcome |
-|-------|--------|--------------|
-| **No true depth** | Z-axis estimated, not measured | Required for 3D biomechanics, joint torques, muscle forces |
-| **Pixel units** | No real-world m/s without calibration | Compare across videos, match research standards (VBT uses m/s) |
-| **Camera angle** | Best perpendicular to movement | Enable flexible deployment, multi-angle analysis |
-| **Occlusion** | Tracking lost when wrists hidden | Complete movement analysis, continuous biomechanics |
+| Issue | Impact |
+|-------|--------|
+| **No true depth** | Z-axis estimated, not measured |
+| **Pixel units** | No real-world m/s without calibration |
+| **Camera angle** | Best perpendicular to movement |
+| **Occlusion** | Tracking lost when wrists hidden |
 
-See `backend/CAPABILITIES.md` for details.
+See `backend/CAPABILITIES.md` for full details and roadmap.
 
 ---
 
