@@ -6,6 +6,8 @@
 
 ## End Goal: Full Biomechanics Pipeline
 
+**Description:** The ultimate objective is to reconstruct complete biomechanics of human movement, including object tracking, body kinematics, and force estimation.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                         ULTIMATE GOAL                                        │
@@ -33,7 +35,12 @@
 
 ## Current Pipeline: What We CAN Do ✅
 
+**Description:** These are the capabilities currently implemented and working in the system.
+
 ### 1. 2D Pose Estimation
+
+**What it does:** Extracts 33 body keypoints from each video frame using MediaPipe.
+
 ```
 ✅ 33 body keypoints per frame (MediaPipe)
 ✅ Normalized coordinates [0-1]
@@ -46,7 +53,16 @@
 - Upper body (11-22): shoulders, elbows, wrists, hands
 - Lower body (23-32): hips, knees, ankles, feet
 
+**Z-axis estimation:** MediaPipe estimates depth using a statistical model trained on human pose datasets. The Z coordinate:
+- Is relative to the hip center (origin point)
+- Uses approximate meters as units
+- Smaller values = closer to camera, larger = farther
+- **Important:** This is an ESTIMATE, not a true measurement. Single cameras cannot directly measure depth - they infer it from learned patterns of human proportions and perspective cues.
+
 ### 2. 2D Bar Tracking
+
+**What it does:** Estimates barbell position by analyzing wrist landmarks and extending along the forearm direction.
+
 ```
 ✅ Bar position from wrist midpoint
 ✅ Forearm-extended grip estimation
@@ -55,7 +71,17 @@
 ✅ Multiple fallback methods
 ```
 
+**How it works:**
+1. Detects wrist positions (landmarks 15, 16)
+2. Extends 18% past wrist along forearm direction (elbow → wrist)
+3. Calculates midpoint of both grip positions
+4. Applies exponential moving average smoothing
+5. Rejects jumps > 500px as outliers
+
 ### 3. 2D Velocity Metrics
+
+**What it does:** Calculates movement speed from frame-to-frame position changes.
+
 ```
 ✅ Frame-to-frame velocity (pixels/second)
 ✅ Peak concentric velocity (upward)
@@ -71,7 +97,12 @@ dt = frame_diff / fps
 velocity = sqrt(dx² + dy²) / dt  # px/s
 ```
 
+**Note:** Y-axis is inverted in image coordinates (y=0 at top), so `vertical_velocity = -dy/dt` makes positive values represent upward movement.
+
 ### 4. Joint Angle Calculation
+
+**What it does:** Calculates angles at joints using three-point geometry and dot product.
+
 ```
 ✅ Elbow angles (shoulder→elbow→wrist)
 ✅ Knee angles (hip→knee→ankle)
@@ -87,33 +118,48 @@ angle = arccos(v1·v2 / |v1||v2|)
 ```
 
 ### 5. Rep Counting
+
+**What it does:** Automatically detects complete lift cycles by tracking midpoint crossings.
+
 ```
 ✅ Automatic rep detection
 ✅ Midpoint crossing algorithm
 ✅ Works for repetitive movements
 ```
 
+**Algorithm:** Tracks when bar crosses the midpoint of its vertical range going upward (concentric phase).
+
 ### 6. Form Analysis (Rule-Based)
+
+**What it does:** Provides basic form scoring based on bar path quality and joint symmetry.
+
 ```
 ✅ Path verticality scoring
 ✅ Elbow symmetry scoring
 ✅ Basic form recommendations
 ```
 
+**Scoring:** Combines path verticality (>0.7 = good) and elbow asymmetry (<10° = good) into overall form score.
+
 ---
 
 ## Current Limitations: What We CAN'T Do ❌
 
+**Description:** Fundamental constraints due to single-camera setup and current implementation.
+
 ### 1. No True 3D Reconstruction
+
+**Why this limitation exists:** Single cameras capture 2D images, losing depth information.
 
 ```
 ❌ FUNDAMENTAL LIMITATION: Single camera = no depth
 ```
 
-**Why?**
+**Technical explanation:**
 - A single 2D image loses the Z-axis (depth) information
-- MediaPipe's Z-coordinate is **estimated**, not measured
+- MediaPipe's Z-coordinate is **estimated** using statistical models, not measured
 - The Z value is relative to hip depth, not absolute meters
+- Estimation accuracy degrades with unusual poses or camera angles
 
 **Impact:**
 - Cannot calculate true 3D position of objects
@@ -130,6 +176,8 @@ Camera View:
 ```
 
 ### 2. No Real-World Units
+
+**Why this limitation exists:** No calibration reference to convert pixels to physical measurements.
 
 ```
 ❌ All measurements in PIXELS, not cm/m
@@ -150,24 +198,34 @@ velocity_cms = velocity_pxs * scale
 
 ### 3. No Center of Mass Estimation
 
+**Why this limitation exists:** Current method uses wrist midpoint as proxy, not actual object detection.
+
 ```
 ❌ Cannot estimate geometric center of object
 ❌ Cannot track object independently of body
 ```
 
-**Why?**
-- Current method uses wrist midpoint as proxy
+**Current approach:**
+- Uses wrist midpoint as proxy for bar position
 - No actual detection of barbell shape/bounds
 - No segmentation mask of the object
 
+**What's needed:** Object segmentation (e.g., SAM3) to get actual object boundaries and calculate geometric center.
+
 ### 4. No Contact Point Detection
+
+**Why this limitation exists:** No object segmentation or detailed hand pose analysis.
 
 ```
 ❌ Cannot determine where object contacts body
 ❌ Cannot detect grip position on bar
 ```
 
+**What's needed:** Object mask + hand keypoints + proximity analysis.
+
 ### 5. No Force Estimation
+
+**Why this limitation exists:** Forces require 3D kinematics, body models, and inverse dynamics.
 
 ```
 ❌ No joint torques
@@ -175,37 +233,49 @@ velocity_cms = velocity_pxs * scale
 ❌ No ground reaction forces
 ```
 
-**Why?**
-- Forces require:
-  - Accurate 3D kinematics
-  - Body segment masses
-  - Acceleration data
-  - Inverse dynamics model
+**Requirements:**
+- Accurate 3D kinematics
+- Body segment masses
+- Acceleration data
+- Inverse dynamics model (Newton-Euler equations)
 
 ### 6. No Occlusion Handling
+
+**Why this limitation exists:** No prediction or interpolation when body parts are hidden.
 
 ```
 ❌ Tracking fails when body parts hidden
 ❌ No prediction during occlusion
 ```
 
+**Impact:** Tracking quality degrades when hands/wrists are occluded by body or equipment.
+
 ### 7. Camera Angle Dependency
+
+**Why this limitation exists:** 2D projection accuracy varies with viewing angle.
 
 ```
 ❌ Accuracy varies with camera position
 ❌ Best only when perpendicular to movement plane
 ```
 
-**Worst case:** Camera parallel to bar movement  
-**Best case:** Camera perpendicular to sagittal plane
+**Worst case:** Camera parallel to bar movement (can't see vertical motion)  
+**Best case:** Camera perpendicular to sagittal plane (side view)
 
 ---
 
 ## What Can Be Built Upon 🔧
 
+**Description:** Roadmap for extending the current pipeline toward full biomechanics analysis.
+
 ### Near-Term Additions (Current Architecture)
 
+**Description:** Features that can be added without major architectural changes.
+
 #### 1. Multi-Camera 3D Reconstruction
+
+**What it adds:** True 3D coordinates through triangulation.
+
 ```
 Difficulty: MEDIUM
 Requires: 2+ synchronized cameras, calibration
@@ -220,7 +290,12 @@ Benefits:
   ✅ Velocity in m/s
 ```
 
+**How it works:** Triangulate corresponding points from multiple views to recover depth.
+
 #### 2. Depth Camera Integration (RealSense, Kinect)
+
+**What it adds:** Direct depth measurement per pixel.
+
 ```
 Difficulty: LOW-MEDIUM
 Requires: RGB-D camera
@@ -231,7 +306,12 @@ Benefits:
   ✅ Point cloud of scene
 ```
 
+**How it works:** RGB-D cameras use structured light or time-of-flight to measure depth directly.
+
 #### 3. Object Segmentation (SAM3)
+
+**What it adds:** Actual object boundaries and geometric center calculation.
+
 ```
 Difficulty: MEDIUM
 Requires: SAM3 model integration
@@ -245,9 +325,12 @@ Benefits:
   ✅ Object tracking independent of pose
 ```
 
-Current SAM3 exists in: `/Users/julianng-thow-hing/Desktop/modelhealthdemo/sam3/`
+**Current SAM3 exists in:** `/Users/julianng-thow-hing/Desktop/modelhealthdemo/sam3/`
 
 #### 4. Calibration for Real-World Units
+
+**What it adds:** Conversion from pixels to physical measurements.
+
 ```
 Difficulty: LOW
 Requires: Reference object in frame (bar length, plate diameter)
@@ -259,9 +342,16 @@ Implementation:
   4. Calculate pixels-per-cm scale factor
 ```
 
+**How it works:** Use known object dimensions (e.g., Olympic bar = 220cm) to establish scale.
+
 ### Medium-Term Additions (Architecture Extension)
 
+**Description:** Features requiring significant architectural changes or new libraries.
+
 #### 5. Velocity & Acceleration in 3D
+
+**What it adds:** Full 3D motion analysis.
+
 ```
 Requires: 3D reconstruction first
 
@@ -274,7 +364,12 @@ Then:
   - Centripetal acceleration
 ```
 
+**How it works:** Once 3D positions are available, calculate derivatives for velocity and acceleration.
+
 #### 6. Inverse Kinematics
+
+**What it adds:** Accurate joint angles from 3D pose.
+
 ```
 Requires: Accurate 3D pose
 
@@ -284,7 +379,12 @@ Pipeline:
 Libraries: OpenSim, Biomechanics Toolkit
 ```
 
+**How it works:** Use kinematic constraints and optimization to solve for joint angles.
+
 #### 7. Contact Detection
+
+**What it adds:** Identification of where objects contact the body.
+
 ```
 Requires: Object segmentation + pose
 
@@ -295,9 +395,16 @@ Algorithm:
   4. Identify contact points
 ```
 
+**How it works:** Overlay object mask with hand landmarks to find intersection regions.
+
 ### Long-Term Additions (Full Biomechanics)
 
+**Description:** Complete biomechanics pipeline requiring specialized modeling tools.
+
 #### 8. Inverse Dynamics
+
+**What it adds:** Joint torques from kinematics.
+
 ```
 Requires: 3D kinematics + body model + GRF
 
@@ -313,7 +420,12 @@ Where:
   F = external forces
 ```
 
+**How it works:** Apply Newton-Euler equations recursively through the kinematic chain.
+
 #### 9. Musculoskeletal Modeling
+
+**What it adds:** Muscle force estimation from joint torques.
+
 ```
 Requires: Inverse dynamics + muscle model
 
@@ -325,7 +437,12 @@ Pipeline:
 Solves: τ = Σ(r_i × F_muscle_i)
 ```
 
+**How it works:** Optimize muscle activations to match required joint torques.
+
 #### 10. Ground Reaction Force Estimation
+
+**What it adds:** External forces acting on the body.
+
 ```
 Options:
   A. Force plate (gold standard)
@@ -333,9 +450,13 @@ Options:
   C. Inverse dynamics + known accelerations
 ```
 
+**How it works:** Measure or estimate forces at contact points (feet/hands).
+
 ---
 
 ## Accuracy Comparison
+
+**Description:** Expected accuracy improvements with different hardware setups.
 
 | Metric | Current (2D) | With Depth Camera | With Multi-Camera |
 |--------|--------------|-------------------|-------------------|
@@ -349,6 +470,8 @@ Options:
 
 ## Recommended Next Steps
 
+**Description:** Prioritized development roadmap.
+
 ### For Professor Demo
 1. **Show current capabilities** - 2D tracking works well
 2. **Acknowledge limitations** - Be clear about single-camera constraints
@@ -361,15 +484,3 @@ Priority 2: SAM3 integration (object segmentation)
 Priority 3: Multi-camera or depth camera (true 3D)
 Priority 4: Inverse dynamics (joint forces)
 ```
-
----
-
-## References
-
-- [OpenSim](https://opensim.stanford.edu/) - Musculoskeletal modeling
-- [MediaPipe Pose](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker) - Current pose estimation
-- [OpenCap](https://github.com/stanfordnmbl/opencap-core) - Video-based biomechanics
-- [SAM3](https://github.com/facebookresearch/sam3) - Segment Anything Model
-- [Biomechanics Toolkit](https://github.com/Biomechanical-ToolKit/BTKCore) - Motion analysis
-- [VBT Research](https://pmc.ncbi.nlm.nih.gov/articles/PMC7866505/) - Velocity-based training science
-

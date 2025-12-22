@@ -51,6 +51,12 @@ pose_landmarks = pose_estimator.estimate(frame, roi=tracking_roi)
 
 **Key landmarks:** 15, 16 = wrists | 13, 14 = elbows | 11, 12 = shoulders
 
+**Z-axis estimation:** MediaPipe estimates depth using a statistical model trained on human pose data. The Z value is relative to the hip center (origin), where:
+- Smaller Z = closer to camera
+- Larger Z = farther from camera
+- Units are approximate meters, but accuracy is limited without true depth measurement
+- This is an **estimate**, not a measurement, because single-camera systems cannot directly measure depth
+
 ---
 
 ## Step 3: Bar Position Estimation
@@ -126,8 +132,6 @@ for i in range(1, len(sorted_traj)):
     })
 ```
 
-**⚠️ Y-axis is inverted:** y=0 at top, so `vertical_velocity = -dy/dt` makes positive = upward
-
 ---
 
 ## Step 5: Joint Angle Calculation
@@ -146,7 +150,7 @@ def calculate_angle(p1: Dict, p2: Dict, p3: Dict) -> Optional[float]:
     
     # Create vectors from p2 to p1 and p2 to p3
     v1 = np.array([p1["x"] - p2["x"], p1["y"] - p2["y"]])
-    v2 = np.array([p3["x"] - p2["x"], p3["y"] - p2["y"]])
+    v2 = np.array([p3["x"] - p2["x"], p3["y"] - p2["y"])
     
     # Calculate angle using dot product
     cos_angle = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-6)
@@ -246,8 +250,3 @@ backend/src/services/
 cd backend
 python run.py  # Starts on port 8000
 ```
-
-## References
-
-- [MediaPipe Pose](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker)
-- [VBT Research](https://pmc.ncbi.nlm.nih.gov/articles/PMC7866505/)
