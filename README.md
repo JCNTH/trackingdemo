@@ -1,183 +1,136 @@
-# Exercise Tracker
+# Exercise Tracker - Backend Pipeline
 
-A video-based exercise tracking app that uses computer vision to analyze movement form. Upload a video of your lift, and get insights on bar path, velocity, and joint angles.
+Video-based exercise tracking using pose estimation to calculate bar path, velocity, and joint angles.
 
-## End Goal
-
-```
-Center of mass of object → 3D position & velocity → Contact with body
-                                    ↓
-              Reconstruct kinematics and forces of human body
-              (joint angles, joint torques, muscle forces)
-```
-
-## Current Capabilities
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| 2D Pose Estimation | ✅ Working | 33 keypoints via MediaPipe |
-| Bar Tracking | ✅ Working | Wrist midpoint estimation |
-| 2D Velocity | ✅ Working | Pixels/second |
-| Joint Angles | ✅ Working | Dot product formula |
-| Rep Counting | ✅ Working | Midpoint crossing |
-| 3D Reconstruction | ❌ Not Yet | Requires multi-camera or depth |
-| Real-World Units | ❌ Not Yet | Requires calibration |
-| Force Estimation | ❌ Not Yet | Requires 3D + dynamics |
-
-**See [`backend/CAPABILITIES.md`](backend/CAPABILITIES.md) for full details on limitations and roadmap.**
-
-## What It Does
-
-- **Upload exercise videos** - supports bench press, squat, deadlift, overhead press
-- **Track bar path** - estimates bar position from wrist landmarks
-- **Calculate velocity** - measures movement speed in pixels/second  
-- **Analyze form** - rule-based feedback on elbow angles, bar path verticality
-
-## Tech Stack
-
-| Layer | Tech |
-|-------|------|
-| Frontend | Next.js 15, Tailwind CSS, shadcn/ui |
-| Backend | FastAPI, Python 3.10+ |
-| CV | MediaPipe Pose, YOLO v8/v11 |
-| Database | Supabase (PostgreSQL + Storage) |
-
-## How It Works
-
-The pipeline extracts 33 body keypoints per frame using MediaPipe, then tracks the bar position by calculating the midpoint between wrist landmarks.
+## Pipeline Overview
 
 ```
-Video → Pose Estimation → Bar Tracking → Velocity Calculation → Metrics
-         (MediaPipe)        (wrist midpoint)   (dx/dt)
+Video → Pose Estimation → Bar Tracking → Velocity → Metrics
+         (MediaPipe)      (wrist midpoint)  (dx/dt)
 ```
 
-**Full technical documentation:** [`backend/PIPELINE.md`](backend/PIPELINE.md)
+---
 
-## Key Limitations (Single Camera)
+## Step 1: Pose Estimation
 
-| Limitation | Impact | Solution |
-|------------|--------|----------|
-| **No true depth** | Can't measure Z-axis | Multi-camera or depth sensor |
-| **Pixel units only** | No real-world m/s | Calibration with known object |
-| **No object segmentation** | Can't find true center of mass | SAM3 integration |
-| **No force estimation** | Can't calculate joint torques | 3D + inverse dynamics |
-| **Camera angle dependent** | Best perpendicular to movement | Multi-view setup |
+Extract 33 body keypoints using MediaPipe.
 
-## Backend Services
+```python
+# pose_estimator.py
+rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+results = pose_model.process(rgb_frame)
 
-| File | Purpose |
-|------|---------|
-| `trajectory_tracker.py` | Main pipeline orchestration |
-| `pose_estimator.py` | MediaPipe pose detection (33 keypoints) |
-| `barbell_detector.py` | Bar position estimation + smoothing |
-| `form_analyzer.py` | Rule-based form analysis |
-| `yolo_detector.py` | YOLO object detection |
-| `yolo_pose_estimator.py` | YOLO-Pose single-pass detection |
-
-## Metrics Calculated
-
-| Metric | Formula | Unit |
-|--------|---------|------|
-| `peak_concentric_velocity` | max(-dy/dt) | px/s |
-| `peak_eccentric_velocity` | max(dy/dt) | px/s |
-| `vertical_displacement` | max(y) - min(y) | px |
-| `path_verticality` | 1 - (Δx / Δy) | 0-1 |
-| `estimated_reps` | midpoint crossings | count |
-| `elbow_angle` | arccos(v1·v2 / \|v1\|\|v2\|) | degrees |
-
-## Setup
-
-### Prerequisites
-
-- Node.js 18+
-- Python 3.10+ with Conda (recommended) or pip
-- Supabase account
-
-### 1. Clone and install
-
-```bash
-git clone https://github.com/JCNTH/trackingdemo.git
-cd trackingdemo
+# Output: normalized coordinates [0-1]
+landmark = {
+    "x": 0.45,      # horizontal position
+    "y": 0.62,      # vertical position
+    "z": -0.12,     # relative depth (estimated)
+    "visibility": 0.95
+}
 ```
 
-### 2. Frontend
+**Key landmarks:** 15, 16 = wrists | 13, 14 = elbows | 11, 12 = shoulders
 
-```bash
-cd frontend
-npm install
+---
+
+## Step 2: Bar Position Estimation
+
+Estimate bar center from wrist midpoint with forearm extension.
+
+```python
+# barbell_detector.py
+# Extend 18% past wrist along forearm direction
+forearm_vector = wrist_px - elbow_px
+grip_position = wrist_px + 0.18 * forearm_vector
+
+# Bar center = midpoint of both grips
+bar_center = (left_grip + right_grip) / 2
 ```
 
-Create `frontend/.env.local`:
-```
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+**Smoothing:** EMA with α=0.5, reject jumps > 500px
+
+---
+
+## Step 3: Velocity Calculation
+
+Calculate frame-to-frame velocity. **Y-axis is inverted** (y=0 at top).
+
+```python
+# trajectory_tracker.py
+dx = curr.x - prev.x
+dy = curr.y - prev.y
+dt = frame_diff / fps
+
+vx = dx / dt  # px/s
+vy = dy / dt  # px/s
+vertical_velocity = -vy  # positive = upward
 ```
 
-### 3. Backend
+---
+
+## Step 4: Joint Angles
+
+Calculate angles using dot product.
+
+```python
+# trajectory_tracker.py
+v1 = [p1.x - p2.x, p1.y - p2.y]
+v2 = [p3.x - p2.x, p3.y - p2.y]
+
+cos_angle = dot(v1, v2) / (|v1| * |v2|)
+angle = arccos(cos_angle) * (180/π)
+```
+
+**Elbow angle:** shoulder → elbow → wrist (landmarks 11→13→15)
+
+---
+
+## Step 5: Output Metrics
+
+```python
+{
+    "peak_concentric_velocity": 340.5,  # px/s (max upward)
+    "peak_eccentric_velocity": 280.2,   # px/s (max downward)
+    "vertical_displacement": 157.0,     # px
+    "path_verticality": 0.87,           # 0-1 (1 = vertical)
+    "estimated_reps": 5,
+    "elbow_asymmetry": 8.3              # degrees
+}
+```
+
+---
+
+## Limitations (Single Camera)
+
+| Issue | Impact |
+|-------|--------|
+| No depth | Z-axis estimated, not measured |
+| Pixel units | No real-world m/s without calibration |
+| Camera angle | Best perpendicular to movement |
+| Occlusion | Tracking lost when body parts hidden |
+
+---
+
+## Files
+
+```
+backend/src/services/
+├── trajectory_tracker.py   # Main pipeline
+├── pose_estimator.py       # MediaPipe 33 keypoints
+├── barbell_detector.py     # Bar position + smoothing
+└── form_analyzer.py        # Rule-based scoring
+```
+
+---
+
+## Run
 
 ```bash
 cd backend
-conda env create -f environment.yml
-conda activate exercise-tracker
-```
-
-Create `backend/.env`:
-```
-SUPABASE_URL=your_supabase_url
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-```
-
-### 4. Run
-
-```bash
-# Terminal 1 - Frontend
-cd frontend && npm run dev
-
-# Terminal 2 - Backend  
-cd backend && python run.py
-```
-
-Open http://localhost:3000
-
-## Project Structure
-
-```
-├── frontend/
-│   ├── src/
-│   │   ├── app/            # Next.js pages
-│   │   ├── components/     # React components
-│   │   └── lib/            # API client, utilities
-│   
-├── backend/
-│   ├── src/
-│   │   ├── routers/        # FastAPI endpoints
-│   │   ├── services/       # CV pipeline (pose, tracking)
-│   │   └── db/             # Supabase client
-│   ├── PIPELINE.md         # Technical documentation
-│   └── CAPABILITIES.md     # Limitations & roadmap
-│
-├── sam3/                   # SAM3 model (for future segmentation)
-```
-
-## Future Roadmap
-
-```
-Current State                    Near-Term                      Long-Term
-─────────────────────────────────────────────────────────────────────────────
-2D Pose + Bar Tracking    →    Object Segmentation (SAM3)  →  3D Reconstruction
-         ↓                              ↓                            ↓
-Pixel Velocities          →    Calibration (real units)    →  Inverse Dynamics
-         ↓                              ↓                            ↓
-Joint Angles              →    Contact Point Detection     →  Muscle Force Est.
+python run.py  # Starts on port 8000
 ```
 
 ## References
 
 - [MediaPipe Pose](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker)
-- [Velocity Based Training Research](https://pmc.ncbi.nlm.nih.gov/articles/PMC7866505/)
-- [OpenCap](https://github.com/stanfordnmbl/opencap-core) - inspiration for architecture
-- [OpenSim](https://opensim.stanford.edu/) - musculoskeletal modeling
-
-## License
-
-MIT
+- [VBT Research](https://pmc.ncbi.nlm.nih.gov/articles/PMC7866505/)
