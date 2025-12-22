@@ -134,6 +134,12 @@ Single cameras capture 2D images. Depth information is lost.
 - No real-world velocities (m/s) without calibration
 - Movement parallel to camera is invisible
 
+**Why overcome:** True 3D is required for:
+- Accurate joint torque calculations (inverse dynamics needs 3D kinematics)
+- Muscle force estimation (musculoskeletal models require 3D joint angles)
+- Complete biomechanics analysis (cannot calculate forces from 2D alone)
+- Movement analysis from any angle (current setup only works perpendicular to camera)
+
 ### 2. No Real-World Units
 
 All measurements in pixels, not cm/m.
@@ -147,6 +153,12 @@ All measurements in pixels, not cm/m.
 
 **Solution:** Detect reference object (e.g., barbell = 220cm) to establish scale.
 
+**Why overcome:** Real-world units enable:
+- Comparison across videos (different cameras, distances, resolutions)
+- Matching research standards (velocity-based training uses m/s, not px/s)
+- Actionable feedback (athletes need "0.85 m/s" not "340 px/s")
+- Integration with biomechanics tools (OpenSim, force plates use real units)
+
 ### 3. No Center of Mass Estimation
 
 Wrist midpoint is used as proxy. No actual object detection.
@@ -159,6 +171,12 @@ Wrist midpoint is used as proxy. No actual object detection.
 **Current:** Wrist midpoint proxy  
 **Needed:** Object segmentation (SAM3) for actual boundaries
 
+**Why overcome:** True center of mass enables:
+- Accurate object tracking independent of body pose
+- Proper physics calculations (forces act on center of mass, not wrist)
+- Analysis of object dynamics (rotation, moment of inertia)
+- Contact point detection (where object touches body)
+
 ### 4. No Contact Point Detection
 
 Cannot determine where object contacts body.
@@ -169,6 +187,12 @@ Cannot determine where object contacts body.
 ```
 
 **Needed:** Object mask + hand keypoints + overlap analysis
+
+**Why overcome:** Contact points are needed for:
+- Accurate force calculations (forces act at contact points)
+- Grip width analysis (affects muscle activation patterns)
+- Hand position feedback (critical for form correction)
+- Complete biomechanics model (contact forces are inputs to inverse dynamics)
 
 ### 5. No Force Estimation
 
@@ -186,6 +210,12 @@ Forces require 3D kinematics, body models, and inverse dynamics.
 - Acceleration data
 - Inverse dynamics (Newton-Euler)
 
+**Why overcome:** Force estimation is the end goal:
+- Joint torques reveal loading patterns and injury risk
+- Muscle forces show which muscles are working (training optimization)
+- Ground reaction forces quantify external loading
+- Enables complete biomechanics analysis (kinematics → dynamics → forces)
+
 ### 6. No Occlusion Handling
 
 Tracking fails when body parts are hidden.
@@ -196,6 +226,12 @@ Tracking fails when body parts are hidden.
 ```
 
 **Solution:** Kalman filters or LSTM networks (not implemented)
+
+**Why overcome:** Continuous tracking is essential:
+- Complete movement analysis (cannot miss critical phases)
+- Accurate velocity calculations (gaps create errors)
+- Reliable biomechanics (forces need continuous kinematics)
+- Real-world usability (occlusion is common in gym settings)
 
 ### 7. Camera Angle Dependency
 
@@ -208,6 +244,12 @@ Accuracy varies with camera position.
 
 **Best:** Side view (perpendicular to sagittal plane)  
 **Worst:** Parallel to bar movement
+
+**Why overcome:** Flexible camera placement enables:
+- Real-world deployment (users cannot always position camera perfectly)
+- Multi-angle analysis (different views reveal different aspects)
+- Robust system (works regardless of setup constraints)
+- Professional applications (gyms need flexible installation)
 
 ---
 
