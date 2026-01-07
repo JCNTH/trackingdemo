@@ -9,9 +9,14 @@ Core logic: `backend/src/services/trajectory_tracker.py`
 ## Pipeline
 
 ```
-Video → Pose Estimation → Bar Tracking → Velocity → Metrics
-         (MediaPipe)      (wrist midpoint)  (dx/dt)
+Video → Pose Estimation → Person Segmentation → Bar Tracking → Velocity → Metrics
+         (MediaPipe)       (YOLO11n-seg)       (wrist proxy)    (dx/dt)
 ```
+
+**NEW: Person Segmentation**
+- Model: YOLO11n-seg (5.9 MB, ~30ms/frame on CPU)
+- Provides: Binary mask, center of mass, bounding box
+- Source: https://docs.ultralytics.com/tasks/segment/
 
 ---
 
@@ -239,10 +244,11 @@ See `backend/CAPABILITIES.md` for full details and roadmap.
 
 ```
 backend/src/services/
-├── trajectory_tracker.py   # Main pipeline
-├── pose_estimator.py       # MediaPipe 33 keypoints
-├── barbell_detector.py     # Bar position + smoothing
-└── form_analyzer.py        # Rule-based scoring
+├── trajectory_tracker.py    # Main pipeline (8 steps)
+├── pose_estimator.py        # MediaPipe 33 keypoints
+├── segmentation_service.py  # YOLO11n-seg person segmentation (NEW)
+├── barbell_detector.py      # Bar position + smoothing
+└── form_analyzer.py         # Rule-based scoring
 ```
 
 ---

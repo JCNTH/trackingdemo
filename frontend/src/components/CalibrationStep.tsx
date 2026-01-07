@@ -8,24 +8,31 @@
  * 4. Show bar position preview (wrist midpoint)
  * 5. Start processing on confirmation
  * 
+ * NEW: Click-to-Track Mode
+ * - User can click directly on an object (barbell) to track it
+ * - Uses SAM2 for precise segmentation
+ * - Tracks the selected object throughout the video
+ * 
  * This ensures accurate tracking when multiple people are in frame.
  */
 'use client'
 
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation } from '@tanstack/react-query'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { PersonSelector } from '@/components/PersonSelector'
+import { ObjectClickSelector } from '@/components/ObjectClickSelector'
 import { 
   Loader2, AlertCircle, RefreshCw, Target, 
   ChevronRight, CheckCircle2
 } from 'lucide-react'
-import { apiClient, type DetectedPerson, type PoseBackend } from '@/lib/api'
+import { apiClient, type DetectedPerson, type PoseBackend, type SegmentationModel } from '@/lib/api'
 
 interface CalibrationStepProps {
   videoId: string
   onComplete: (selectedPersonBbox?: [number, number, number, number]) => void
+  onClickToTrackComplete?: (clickPoint: { x: number; y: number }, model: SegmentationModel) => void
   onCancel: () => void
 }
 
@@ -34,6 +41,7 @@ type CalibrationState = 'loading' | 'select_person' | 'confirm_bar' | 'ready'
 export function CalibrationStep({
   videoId,
   onComplete,
+  onClickToTrackComplete,
   onCancel,
 }: CalibrationStepProps) {
   const [state, setState] = useState<CalibrationState>('loading')
@@ -41,7 +49,19 @@ export function CalibrationStep({
   const [frameNumber, setFrameNumber] = useState(0)
   const [poseBackend, setPoseBackend] = useState<PoseBackend>('yolo')
 
-  // Fetch calibration data
+  // Fetch first frame for click-to-track (primary method)
+  const {
+    data: firstFrameData,
+    isLoading: frameLoading,
+    error: frameError,
+  } = useQuery({
+    queryKey: ['first-frame', videoId],
+    queryFn: () => apiClient.getFirstFrame(videoId),
+    retry: false,
+    refetchOnWindowFocus: false,
+  })
+
+  // Fallback: Fetch calibration data (legacy person selection)
   const {
     data: calibrationData,
     isLoading,
@@ -52,7 +72,15 @@ export function CalibrationStep({
     queryFn: () => apiClient.calibrateVideo(videoId, frameNumber, poseBackend),
     retry: false,
     refetchOnWindowFocus: false,
+    enabled: !!frameError, // Only fetch if click-to-track fails
   })
+
+  // Handle click-to-track confirmation
+  const handleClickToTrackConfirmed = (clickPoint: { x: number; y: number }, model: SegmentationModel) => {
+    if (onClickToTrackComplete) {
+      onClickToTrackComplete(clickPoint, model)
+    }
+  }
   
   const handleBackendChange = (backend: PoseBackend) => {
     setPoseBackend(backend)
@@ -109,6 +137,40 @@ export function CalibrationStep({
     setState('select_person')
   }
 
+  // Loading first frame for click-to-track
+  if (frameLoading) {
+    return (
+      <Card className="p-8">
+        <div className="flex flex-col items-center justify-center gap-4 py-8">
+          <div className="p-4 rounded-full bg-primary/10">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+          <div className="text-center">
+            <p className="font-medium">Loading Video Frame</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              Preparing for object selection...
+            </p>
+          </div>
+        </div>
+      </Card>
+    )
+  }
+
+  // Main click-to-track UI (default mode)
+  if (firstFrameData) {
+    return (
+      <ObjectClickSelector
+        videoId={videoId}
+        frameImage={firstFrameData.frame_image}
+        frameWidth={firstFrameData.width}
+        frameHeight={firstFrameData.height}
+        onSegmentConfirmed={handleClickToTrackConfirmed}
+        onCancel={onCancel}
+      />
+    )
+  }
+
+  // Fallback loading state
   if (isLoading || state === 'loading') {
     return (
       <Card className="p-8">

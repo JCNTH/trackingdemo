@@ -1,19 +1,22 @@
-import logging
-from typing import Optional
-from fastapi import APIRouter, HTTPException, BackgroundTasks
-from pydantic import BaseModel
+"""
+================================================================================
+VIDEOS ROUTER - Video Data Endpoints
+================================================================================
 
-from db.supabase import get_supabase, get_video, update_video_status
-from services.trajectory_tracker import process_video_pipeline
+Simple CRUD and data retrieval for videos.
+Processing is handled by click_to_track.py router.
+
+================================================================================
+"""
+
+import logging
+from fastapi import APIRouter, HTTPException
+
+from db.supabase import get_supabase, get_video
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-class ProcessRequest(BaseModel):
-    """Optional request body for processing endpoint."""
-    selected_person_bbox: Optional[list[float]] = None  # [x1, y1, x2, y2] normalized
 
 
 @router.get("/{video_id}")
@@ -36,46 +39,6 @@ async def get_video_status(video_id: str):
         "status": video["status"],
         "error_message": video.get("error_message"),
     }
-
-
-@router.post("/{video_id}/process")
-async def start_video_processing(
-    video_id: str, 
-    background_tasks: BackgroundTasks,
-    request: Optional[ProcessRequest] = None,
-):
-    """
-    Start video processing in background.
-    
-    If selected_person_bbox is provided, only that person will be tracked.
-    This is used after the calibration step where the user selects which
-    person to track.
-    """
-    video = await get_video(video_id)
-    if not video:
-        raise HTTPException(status_code=404, detail="Video not found")
-    
-    if video["status"] == "processing":
-        raise HTTPException(status_code=400, detail="Video is already being processed")
-    
-    # Update status to processing
-    await update_video_status(video_id, "processing")
-    
-    # Get selected person bbox if provided
-    selected_bbox = None
-    if request and request.selected_person_bbox:
-        selected_bbox = request.selected_person_bbox
-        logger.info(f"Processing video {video_id} with selected person bbox: {selected_bbox}")
-    
-    # Start background processing
-    background_tasks.add_task(
-        process_video_pipeline, 
-        video_id, 
-        video["storage_path"],
-        selected_person_bbox=selected_bbox,
-    )
-    
-    return {"success": True, "message": "Processing started"}
 
 
 @router.get("/{video_id}/detections")
@@ -107,7 +70,7 @@ async def get_tracking_session(video_id: str):
 
 @router.get("/{video_id}/export")
 async def export_video_data(video_id: str, format: str = "json"):
-    """Export detection data."""
+    """Export detection and tracking data."""
     client = get_supabase()
     
     # Get detection results
@@ -127,5 +90,4 @@ async def export_video_data(video_id: str, format: str = "json"):
             "tracking": tracking.data,
         }
     else:
-        raise HTTPException(status_code=400, detail="Unsupported export format")
-
+        raise HTTPException(status_code=400, detail="Unsupported export format. Use 'json'.")

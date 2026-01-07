@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-from routers import videos, processing
+from routers import videos, click_to_track
 from db.supabase import init_supabase
 
 load_dotenv()
@@ -56,9 +56,8 @@ async def health_check():
     return {"status": "healthy", "service": "Exercise Tracker API"}
 
 
-# Include routers
 app.include_router(videos.router, prefix="/api/videos", tags=["videos"])
-app.include_router(processing.router, prefix="/api/processing", tags=["processing"])
+app.include_router(click_to_track.router, prefix="/api", tags=["click-to-track"])
 
 
 if __name__ == "__main__":

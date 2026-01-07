@@ -60,11 +60,12 @@ export function BarPathChart({
     const chartHeight = height - padding * 2
 
     // Normalize points to chart coordinates
-    // Note: Y is inverted in SVG (0 is top)
+    // Video Y increases downward, but we want HIGH bar = TOP of chart
+    // Since video Y is low when bar is high, we DON'T invert
     const normalizedPoints = barPath.map((point, i) => ({
       ...point,
       cx: padding + ((point.x - xMin) / xRange) * chartWidth,
-      cy: padding + (1 - (point.y - yMin) / yRange) * chartHeight,
+      cy: padding + ((point.y - yMin) / yRange) * chartHeight,
       normalizedSpeed: point.speed !== undefined ? point.speed / speedMax : 0.5,
     }))
 
@@ -178,7 +179,7 @@ export function BarPathChart({
           className="fill-muted-foreground text-[10px]"
           transform={`rotate(-90, 12, ${height / 2})`}
         >
-          Height ↑
+          Bar Height
         </text>
 
         {/* Main trajectory line */}

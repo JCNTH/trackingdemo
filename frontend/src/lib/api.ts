@@ -147,6 +147,137 @@ class ApiClient {
 
     return response.blob()
   }
+
+  // ===========================================================================
+  // Click-to-Track API
+  // ===========================================================================
+
+  /**
+   * Segmentation model options for click-to-track.
+   * - fastsam: Fastest (~95ms), YOLO-based
+   * - sam2: Most accurate (~280ms with MPS), Meta's SAM2
+   */
+  static readonly SEGMENTATION_MODELS = ['fastsam', 'sam2'] as const
+
+  /**
+   * Get available segmentation models with performance info.
+   */
+  async getAvailableModels() {
+    return this.request<{
+      fastsam: {
+        name: string
+        description: string
+        size_mb: number
+        speed_ms: number
+        accuracy: string
+        recommended_for: string
+      }
+      sam2: {
+        name: string
+        description: string
+        size_mb: number
+        speed_ms: number
+        accuracy: string
+        recommended_for: string
+        mps_available: boolean
+      }
+      default: string
+      mps_available: boolean
+    }>('/click-to-track/models')
+  }
+
+  /**
+   * Get the first frame of a video for click-to-track selection.
+   */
+  async getFirstFrame(videoId: string, frameNumber: number = 0) {
+    return this.request<{
+      video_id: string
+      frame_number: number
+      frame_image: string  // Base64 encoded JPEG
+      width: number
+      height: number
+      total_frames: number
+      fps: number
+    }>(`/click-to-track/${videoId}/first-frame?frame_number=${frameNumber}`)
+  }
+
+  /**
+   * Segment an object at the clicked point.
+   * Model options: 'fastsam' (fastest), 'sam2' (accurate)
+   */
+  async segmentAtClick(
+    videoId: string, 
+    clickPoint: { x: number; y: number },
+    model: 'fastsam' | 'sam2' = 'fastsam'
+  ) {
+    return this.request<{
+      success: boolean
+      bbox?: [number, number, number, number]  // [x1, y1, x2, y2]
+      center?: [number, number]                // [x, y]
+      center_of_mass?: [number, number]        // Alias for center
+      area_pixels?: number
+      mask_preview?: string  // Base64 encoded preview image
+      model_used?: string
+      message?: string
+    }>(`/click-to-track/${videoId}/segment`, {
+      method: 'POST',
+      body: JSON.stringify({ click_point: clickPoint, model }),
+    })
+  }
+
+  /**
+   * Process video with click-to-track segmentation.
+   * Model options: 'fastsam' (fastest), 'sam2' (accurate)
+   */
+  async processWithClickToTrack(
+    videoId: string, 
+    clickPoint: { x: number; y: number },
+    model: 'fastsam' | 'sam2' = 'fastsam'
+  ) {
+    return this.request<{
+      status: string
+      message: string
+      model: string
+    }>(`/click-to-track/${videoId}/process`, {
+      method: 'POST',
+      body: JSON.stringify({ click_point: clickPoint, model }),
+    })
+  }
+
+  /**
+   * Get processing progress for a video.
+   */
+  async getProcessingProgress(videoId: string) {
+    return this.request<{
+      video_id: string
+      status: string
+      step: string
+      progress: number
+      detail: string
+    }>(`/click-to-track/${videoId}/progress`)
+  }
+
+  /**
+   * Get information about the click-to-track feature.
+   */
+  async getClickToTrackInfo() {
+    return this.request<{
+      name: string
+      description: string
+      workflow: string[]
+      models: Record<string, {
+        name: string
+        description: string
+        size_mb: number
+        speed_ms: number
+        accuracy: string
+        recommended_for: string
+      }>
+      benchmarks: Record<string, string>
+    }>('/click-to-track/info')
+  }
 }
+
+export type SegmentationModel = typeof ApiClient.SEGMENTATION_MODELS[number]
 
 export const apiClient = new ApiClient()

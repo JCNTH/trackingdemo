@@ -159,23 +159,64 @@ All measurements in pixels, not cm/m.
 - Actionable feedback (athletes need "0.85 m/s" not "340 px/s")
 - Integration with biomechanics tools (OpenSim, force plates use real units)
 
-### 3. No Center of Mass Estimation
+### 3. Person Segmentation ✅ (IMPLEMENTED)
 
-Wrist midpoint is used as proxy. No actual object detection.
+YOLO11n-seg provides person segmentation with center of mass calculation.
 
 ```
-❌ No object segmentation
-❌ No geometric center calculation
+✅ Person segmentation (binary mask)
+✅ Center of mass (geometric centroid)
+✅ Bounding box and confidence
 ```
 
-**Current:** Wrist midpoint proxy  
-**Needed:** Object segmentation (SAM3) for actual boundaries
+**Model:** YOLO11n-seg (5.9 MB, ~30ms/frame on CPU)
+**Source:** https://docs.ultralytics.com/tasks/segment/
 
-**Why overcome:** True center of mass enables:
-- Accurate object tracking independent of body pose
-- Proper physics calculations (forces act on center of mass, not wrist)
-- Analysis of object dynamics (rotation, moment of inertia)
-- Contact point detection (where object touches body)
+**Current capabilities:**
+- Binary segmentation mask of athlete's body
+- Geometric center of mass from mask
+- Per-frame body tracking
+
+**Remaining limitation:** 
+COCO dataset doesn't include "barbell" class, so we still use wrist-based estimation for bar position. Future work: fine-tune on weightlifting data.
+
+### 4. Click-to-Track Segmentation 🆕 (IMPLEMENTED)
+
+User can click on any object (e.g., barbell) in the first frame and track it throughout the video.
+
+```
+✅ Click-based object selection
+✅ SAM2 initial segmentation
+✅ Template-based tracking
+```
+
+**Approach:** Hybrid (SAM2 + lightweight tracking)
+- Frame 1: SAM2 segments clicked object (~26 seconds on CPU)
+- Frames 2-N: Template tracking propagates position (~30ms/frame)
+
+**Source:** https://docs.ultralytics.com/models/sam-2/
+
+**Why hybrid?**
+SAM2 is extremely accurate but slow on CPU:
+| Model      | CPU Speed     |
+|------------|---------------|
+| SAM2-tiny  | 25,997 ms     |
+| YOLO11n-seg| 30 ms         |
+
+A 30-second video (900 frames):
+- Pure SAM2: 900 × 26s = **6.5 hours**
+- Hybrid: 26s + (899 × 0.03s) = **53 seconds**
+
+**Current capabilities:**
+- Click anywhere on barbell in frame 1
+- Get precise initial segmentation
+- Track bounding box through video
+- Calculate center of mass per frame
+
+**Limitations:**
+- Template tracking can lose object during fast motion or occlusion
+- No automatic re-detection when tracking is lost
+- SAM2 first frame takes ~26 seconds on CPU
 
 ### 4. No Contact Point Detection
 
@@ -261,9 +302,14 @@ Accuracy varies with camera position.
 
 **Depth Camera:** RGB-D camera (RealSense, Kinect) for direct depth measurement.
 
-**SAM3 Integration:** Object segmentation for actual boundaries and center of mass.
+**~~SAM3 Integration~~** → **SAM2 Click-to-Track:** ✅ IMPLEMENTED
+- Click on any object (barbell) in first frame
+- Track throughout video using hybrid approach
+- Source: `click_to_track_service.py`
 
 **Calibration:** Detect reference object to convert pixels to real-world units.
+
+**GPU Acceleration:** Enable full SAM2 video mode for real-time tracking (requires GPU).
 
 ### Medium-Term
 
@@ -298,6 +344,9 @@ Accuracy varies with camera position.
 ## Next Steps
 
 **Priority 1:** Calibration system (real-world units)  
-**Priority 2:** SAM3 integration (object segmentation)  
-**Priority 3:** Multi-camera or depth camera (true 3D)  
-**Priority 4:** Inverse dynamics (joint forces)
+**Priority 2:** ✅ Person segmentation (YOLO11n-seg) - IMPLEMENTED  
+**Priority 3:** ✅ Click-to-track barbell segmentation (SAM2 hybrid) - IMPLEMENTED  
+**Priority 4:** Frontend UI for click-to-track (let user select object)  
+**Priority 5:** Multi-camera or depth camera (true 3D)  
+**Priority 6:** Inverse dynamics (joint forces)  
+**Priority 7:** GPU acceleration for full SAM2 video mode
