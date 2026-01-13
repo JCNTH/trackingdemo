@@ -228,19 +228,37 @@ class ApiClient {
   /**
    * Process video with click-to-track segmentation.
    * Model options: 'fastsam' (fastest), 'sam2' (accurate)
+   * 
+   * @param startFrame - First frame to process (0-indexed, default: 0)
+   * @param endFrame - Last frame to process (optional, default: process until end)
    */
   async processWithClickToTrack(
     videoId: string, 
     clickPoint: { x: number; y: number },
-    model: 'fastsam' | 'sam2' = 'fastsam'
+    model: 'fastsam' | 'sam2' = 'fastsam',
+    startFrame?: number,
+    endFrame?: number
   ) {
+    const body: {
+      click_point: { x: number; y: number }
+      model: string
+      start_frame?: number
+      end_frame?: number
+    } = {
+      click_point: clickPoint,
+      model,
+    }
+    
+    if (startFrame !== undefined) body.start_frame = startFrame
+    if (endFrame !== undefined) body.end_frame = endFrame
+    
     return this.request<{
       status: string
       message: string
       model: string
     }>(`/click-to-track/${videoId}/process`, {
       method: 'POST',
-      body: JSON.stringify({ click_point: clickPoint, model }),
+      body: JSON.stringify(body),
     })
   }
 

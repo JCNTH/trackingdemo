@@ -5,6 +5,26 @@ import { Play, Pause, Volume2, VolumeX, Maximize, SkipBack, SkipForward } from '
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
+// Debug logging for frame sync diagnosis - set to true to enable
+const DEBUG_FRAME_SYNC = true
+const debugLog = (location: string, message: string, data?: Record<string, unknown>) => {
+  if (!DEBUG_FRAME_SYNC) return
+  const logEntry = {
+    location,
+    message,
+    data,
+    timestamp: performance.now(),
+    time: new Date().toISOString(),
+  }
+  console.log(`[VideoPlayer] ${message}`, data || '')
+  // Also send to debug server if available
+  fetch('http://127.0.0.1:7244/ingest/frame-sync-debug', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(logEntry),
+  }).catch(() => {})
+}
+
 interface VideoPlayerProps {
   src: string
   onTimeUpdate?: (currentTime: number) => void
@@ -23,32 +43,120 @@ export function VideoPlayer({ src, onTimeUpdate, onLoadedMetadata }: VideoPlayer
     const video = videoRef.current
     if (!video) return
 
+    let animationFrameId: number | null = null
+    let lastLogTime = 0
+    let rafCallCount = 0
+    
+    // Use requestAnimationFrame for smoother time tracking during playback
+    // This gives us ~60fps updates instead of the ~4fps from timeupdate event
+    const rafLoop = () => {
+      if (video && !video.paused) {
+        const now = performance.now()
+        rafCallCount++
+        
+        // Log every 500ms during playback to avoid spam
+        if (now - lastLogTime > 500) {
+          debugLog('VideoPlayer:rafLoop', 'RAF update', {
+            currentTime: video.currentTime,
+            rafCallsInLastInterval: rafCallCount,
+            avgRafInterval: rafCallCount > 0 ? 500 / rafCallCount : 0,
+            videoReadyState: video.readyState,
+          })
+          rafCallCount = 0
+          lastLogTime = now
+        }
+        
+        setCurrentTime(video.currentTime)
+        onTimeUpdate?.(video.currentTime)
+        animationFrameId = requestAnimationFrame(rafLoop)
+      }
+    }
+
     const handleTimeUpdate = () => {
-      setCurrentTime(video.currentTime)
-      onTimeUpdate?.(video.currentTime)
+      // Fallback for when video is paused or seeking
+      if (video.paused) {
+        setCurrentTime(video.currentTime)
+        onTimeUpdate?.(video.currentTime)
+      }
     }
 
     const handleLoadedMetadata = () => {
       setDuration(video.duration)
+      debugLog('VideoPlayer:loadedMetadata', 'Video metadata loaded', {
+        duration: video.duration,
+        videoWidth: video.videoWidth,
+        videoHeight: video.videoHeight,
+        // Calculated FPS from duration and estimated frame count not available directly
+      })
       onLoadedMetadata?.(video.duration, video.videoWidth, video.videoHeight)
     }
 
-    const handlePlay = () => setIsPlaying(true)
-    const handlePause = () => setIsPlaying(false)
-    const handleEnded = () => setIsPlaying(false)
+    const handlePlay = () => {
+      debugLog('VideoPlayer:play', 'Video started playing', {
+        currentTime: video.currentTime,
+      })
+      setIsPlaying(true)
+      lastLogTime = performance.now()
+      rafCallCount = 0
+      // Start RAF loop for smooth updates
+      animationFrameId = requestAnimationFrame(rafLoop)
+    }
+    
+    const handlePause = () => {
+      debugLog('VideoPlayer:pause', 'Video paused', {
+        currentTime: video.currentTime,
+      })
+      setIsPlaying(false)
+      // Stop RAF loop
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId)
+        animationFrameId = null
+      }
+      // Update time one more time when paused
+      setCurrentTime(video.currentTime)
+      onTimeUpdate?.(video.currentTime)
+    }
+    
+    const handleEnded = () => {
+      debugLog('VideoPlayer:ended', 'Video ended', {
+        currentTime: video.currentTime,
+        duration: video.duration,
+      })
+      setIsPlaying(false)
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId)
+        animationFrameId = null
+      }
+    }
+    
+    const handleSeeking = () => {
+      debugLog('VideoPlayer:seeking', 'User seeking', {
+        currentTime: video.currentTime,
+      })
+      // Update immediately when user seeks
+      setCurrentTime(video.currentTime)
+      onTimeUpdate?.(video.currentTime)
+    }
 
     video.addEventListener('timeupdate', handleTimeUpdate)
     video.addEventListener('loadedmetadata', handleLoadedMetadata)
     video.addEventListener('play', handlePlay)
     video.addEventListener('pause', handlePause)
     video.addEventListener('ended', handleEnded)
+    video.addEventListener('seeking', handleSeeking)
+    video.addEventListener('seeked', handleSeeking)
 
     return () => {
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId)
+      }
       video.removeEventListener('timeupdate', handleTimeUpdate)
       video.removeEventListener('loadedmetadata', handleLoadedMetadata)
       video.removeEventListener('play', handlePlay)
       video.removeEventListener('pause', handlePause)
       video.removeEventListener('ended', handleEnded)
+      video.removeEventListener('seeking', handleSeeking)
+      video.removeEventListener('seeked', handleSeeking)
     }
   }, [onTimeUpdate, onLoadedMetadata])
 

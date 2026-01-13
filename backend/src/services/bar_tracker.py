@@ -3,12 +3,40 @@
 import logging
 import tempfile
 import shutil
+import json
+import time
 from pathlib import Path
 from typing import Dict, Tuple
 import numpy as np
 import cv2
 
 logger = logging.getLogger(__name__)
+
+# Debug logging for frame sync diagnosis
+DEBUG_FRAME_SYNC = True
+DEBUG_LOG_FILE = Path(__file__).parent.parent.parent.parent / ".cursor" / "frame_sync_debug.log"
+
+def debug_log(location: str, message: str, data: dict = None):
+    """Log debug information for frame sync diagnosis."""
+    if not DEBUG_FRAME_SYNC:
+        return
+    
+    log_entry = {
+        "location": location,
+        "message": message,
+        "data": data or {},
+        "timestamp": int(time.time() * 1000),
+        "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    
+    logger.info(f"[DEBUG] {location}: {message} | {json.dumps(data or {})}")
+    
+    try:
+        DEBUG_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(DEBUG_LOG_FILE, "a") as f:
+            f.write(json.dumps(log_entry) + "\n")
+    except Exception:
+        pass
 
 _sam2_predictor = None
 
@@ -63,6 +91,17 @@ def process_video_with_click_tracking(
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        
+        # Debug log for frame sync diagnosis
+        debug_log("bar_tracker:video_props", "Video properties during SAM2 tracking", {
+            "fps": fps,
+            "total_frames": total_frames,
+            "width": width,
+            "height": height,
+            "requested_start_frame": start_frame,
+            "requested_end_frame": end_frame,
+            "duration_seconds": total_frames / fps if fps > 0 else 0,
+        })
         
         # Apply frame range
         actual_start = max(0, start_frame)
@@ -178,6 +217,22 @@ def process_video_with_click_tracking(
                 logger.info(f"Processed {frame_idx}/{frames_to_process}")
         
         tracked_frames = sum(1 for t in trajectory if t["center"] is not None)
+        lost_frames = len(trajectory) - tracked_frames
+        
+        # Debug log for frame sync diagnosis
+        frame_indices = [t["frame"] for t in trajectory[:5]] if trajectory else []
+        last_frame_indices = [t["frame"] for t in trajectory[-5:]] if trajectory else []
+        debug_log("bar_tracker:result", "SAM2 tracking complete", {
+            "total_trajectory_points": len(trajectory),
+            "tracked_frames": tracked_frames,
+            "lost_frames": lost_frames,
+            "tracking_rate_percent": (tracked_frames / len(trajectory) * 100) if trajectory else 0,
+            "actual_start_frame": actual_start,
+            "actual_end_frame": actual_end,
+            "first_5_frame_indices": frame_indices,
+            "last_5_frame_indices": last_frame_indices,
+            "fps_stored_in_result": fps,
+        })
         
         return {
             "success": True,

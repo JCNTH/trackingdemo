@@ -3,7 +3,9 @@
 import { useState, useRef, useCallback } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
-import { Loader2, MousePointer2, CheckCircle2, RefreshCw, AlertCircle, Zap } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Loader2, MousePointer2, CheckCircle2, RefreshCw, AlertCircle, Zap, Film } from 'lucide-react'
 import { apiClient, SegmentationModel } from '@/lib/api'
 
 interface ObjectClickSelectorProps {
@@ -11,7 +13,13 @@ interface ObjectClickSelectorProps {
   frameImage: string
   frameWidth: number
   frameHeight: number
-  onSegmentConfirmed: (clickPoint: { x: number; y: number }, model: SegmentationModel) => void
+  totalFrames?: number
+  fps?: number
+  onSegmentConfirmed: (
+    clickPoint: { x: number; y: number }, 
+    model: SegmentationModel,
+    frameRange?: { start: number; end?: number }
+  ) => void
   onCancel: () => void
 }
 
@@ -32,6 +40,8 @@ export function ObjectClickSelector({
   frameImage,
   frameWidth,
   frameHeight,
+  totalFrames,
+  fps,
   onSegmentConfirmed,
   onCancel,
 }: ObjectClickSelectorProps) {
@@ -40,6 +50,9 @@ export function ObjectClickSelector({
   const [clickPoint, setClickPoint] = useState<ClickPoint | null>(null)
   const [isHovering, setIsHovering] = useState(false)
   const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 })
+  const [startFrame, setStartFrame] = useState<number>(0)
+  const [endFrame, setEndFrame] = useState<number | undefined>(undefined)
+  const [showFrameRange, setShowFrameRange] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
 
@@ -126,6 +139,83 @@ export function ObjectClickSelector({
             Mac GPU accelerated
           </div>
         )}
+
+        {/* Frame Range Selector */}
+        <div className="space-y-2">
+          <button
+            onClick={() => setShowFrameRange(!showFrameRange)}
+            className="flex items-center gap-2 text-xs text-zinc-500 hover:text-zinc-700 transition-colors"
+          >
+            <Film className="h-3 w-3" />
+            <span>{showFrameRange ? 'Hide' : 'Set'} frame range</span>
+            {!showFrameRange && totalFrames && (
+              <span className="text-zinc-400">(processing all {totalFrames} frames)</span>
+            )}
+          </button>
+          
+          {showFrameRange && totalFrames && (
+            <div className="grid grid-cols-2 gap-3 p-3 bg-zinc-50 rounded-md border border-zinc-200">
+              <div className="space-y-1.5">
+                <Label htmlFor="start-frame" className="text-xs text-zinc-600">
+                  Start Frame
+                </Label>
+                <Input
+                  id="start-frame"
+                  type="number"
+                  min={0}
+                  max={totalFrames - 1}
+                  value={startFrame}
+                  onChange={(e) => setStartFrame(Math.max(0, Math.min(totalFrames - 1, parseInt(e.target.value) || 0)))}
+                  className="h-8 text-xs"
+                />
+                {fps && (
+                  <span className="text-[10px] text-zinc-400">
+                    {(startFrame / fps).toFixed(2)}s
+                  </span>
+                )}
+              </div>
+              
+              <div className="space-y-1.5">
+                <Label htmlFor="end-frame" className="text-xs text-zinc-600">
+                  End Frame
+                </Label>
+                <Input
+                  id="end-frame"
+                  type="number"
+                  min={startFrame + 1}
+                  max={totalFrames}
+                  value={endFrame ?? ''}
+                  placeholder={`${totalFrames} (end)`}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    if (val === '') {
+                      setEndFrame(undefined)
+                    } else {
+                      setEndFrame(Math.max(startFrame + 1, Math.min(totalFrames, parseInt(val) || totalFrames)))
+                    }
+                  }}
+                  className="h-8 text-xs"
+                />
+                {fps && endFrame && (
+                  <span className="text-[10px] text-zinc-400">
+                    {(endFrame / fps).toFixed(2)}s
+                  </span>
+                )}
+              </div>
+              
+              <div className="col-span-2 flex items-center justify-between text-[10px] text-zinc-500">
+                <span>
+                  Processing {endFrame ? endFrame - startFrame : totalFrames - startFrame} frames
+                </span>
+                {fps && (
+                  <span>
+                    ~{((endFrame ? endFrame - startFrame : totalFrames - startFrame) / fps).toFixed(1)}s duration
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Frame image - adaptive container */}
         <div style={containerStyle}>
@@ -290,8 +380,20 @@ export function ObjectClickSelector({
           <span>Area: {result.area_pixels?.toLocaleString()} px</span>
         </div>
 
-        <Button className="w-full" onClick={() => onSegmentConfirmed({ x: clickPoint.x, y: clickPoint.y }, selectedModel)}>
+        <Button 
+          className="w-full" 
+          onClick={() => onSegmentConfirmed(
+            { x: clickPoint.x, y: clickPoint.y }, 
+            selectedModel,
+            showFrameRange ? { start: startFrame, end: endFrame } : undefined
+          )}
+        >
           Start Tracking
+          {showFrameRange && (
+            <span className="ml-1 text-[10px] opacity-70">
+              ({startFrame}-{endFrame ?? (totalFrames || '∞')})
+            </span>
+          )}
         </Button>
       </div>
     )

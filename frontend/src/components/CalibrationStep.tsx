@@ -32,7 +32,11 @@ import { apiClient, type DetectedPerson, type PoseBackend, type SegmentationMode
 interface CalibrationStepProps {
   videoId: string
   onComplete: (selectedPersonBbox?: [number, number, number, number]) => void
-  onClickToTrackComplete?: (clickPoint: { x: number; y: number }, model: SegmentationModel) => void
+  onClickToTrackComplete?: (
+    clickPoint: { x: number; y: number }, 
+    model: SegmentationModel,
+    frameRange?: { start: number; end?: number }
+  ) => void
   onCancel: () => void
 }
 
@@ -76,9 +80,13 @@ export function CalibrationStep({
   })
 
   // Handle click-to-track confirmation
-  const handleClickToTrackConfirmed = (clickPoint: { x: number; y: number }, model: SegmentationModel) => {
+  const handleClickToTrackConfirmed = (
+    clickPoint: { x: number; y: number }, 
+    model: SegmentationModel,
+    frameRange?: { start: number; end?: number }
+  ) => {
     if (onClickToTrackComplete) {
-      onClickToTrackComplete(clickPoint, model)
+      onClickToTrackComplete(clickPoint, model, frameRange)
     }
   }
   
@@ -164,6 +172,8 @@ export function CalibrationStep({
         frameImage={firstFrameData.frame_image}
         frameWidth={firstFrameData.width}
         frameHeight={firstFrameData.height}
+        totalFrames={firstFrameData.total_frames}
+        fps={firstFrameData.fps}
         onSegmentConfirmed={handleClickToTrackConfirmed}
         onCancel={onCancel}
       />

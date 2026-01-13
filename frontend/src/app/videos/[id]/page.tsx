@@ -15,11 +15,23 @@ import { BarPathChart } from '@/components/BarPathChart'
 import { ProcessedVideoViewer } from '@/components/ProcessedVideoViewer'
 import { 
   ArrowLeft, Play, Loader2, 
-  CheckCircle2, AlertCircle, Clock, RefreshCw, Settings2
+  CheckCircle2, AlertCircle, Clock, RefreshCw, Settings2, Download
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
 import { apiClient } from '@/lib/api'
 import type { Video, DetectionResult, TrackingSession } from '@/types'
+
+// Debug logging for frame sync diagnosis
+const DEBUG_FRAME_SYNC = true
+const debugLog = (location: string, message: string, data?: Record<string, unknown>) => {
+  if (!DEBUG_FRAME_SYNC) return
+  console.log(`[VideoDetailPage] ${message}`, data || '')
+  fetch('http://127.0.0.1:7244/ingest/frame-sync-debug', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ location, message, data, timestamp: performance.now() }),
+  }).catch(() => {})
+}
 
 // Processing progress component
 function ProcessingProgress({ videoId }: { videoId: string }) {
@@ -125,22 +137,40 @@ export default function VideoDetailPage({ params }: { params: Promise<{ id: stri
     enabled: video?.status === 'completed',
   })
 
-  // #region agent log
-  if (video) {
-    fetch('http://127.0.0.1:7244/ingest/20a92eef-16ab-4de5-b181-01e406a7ee4c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:videoDimensions',message:'Video dimensions from DB',data:{dbWidth:video.width,dbHeight:video.height,usedWidth:video.width||1280,usedHeight:video.height||720,videoId:video.id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-  }
-  // #endregion
+  // Debug log video dimensions
+  useEffect(() => {
+    if (video) {
+      debugLog('page:videoDimensions', 'Video dimensions from DB', {
+        dbWidth: video.width,
+        dbHeight: video.height,
+        dbFps: video.fps,
+        videoId: video.id,
+        status: video.status,
+      })
+    }
+  }, [video])
 
   const trajectoryData = useMemo(() => {
     if (!trackingSession?.trajectory_data) return null
-    // #region agent log
-    const td = trackingSession.trajectory_data as any;
-    fetch('http://127.0.0.1:7244/ingest/20a92eef-16ab-4de5-b181-01e406a7ee4c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'page.tsx:trajectoryData',message:'Trajectory data from backend',data:{hasBarPath:!!td?.bar_path,barPathLen:td?.bar_path?.length||0,firstBarPathPoint:td?.bar_path?.[0],barPathKeys:td?.bar_path?.[0]?Object.keys(td.bar_path[0]):[],videoInfoFromTracking:td?.video_info},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B,E'})}).catch(()=>{});
-    // #endregion
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const td = trackingSession.trajectory_data as any
+    
+    // Debug log trajectory data on load
+    debugLog('page:trajectoryData', 'Trajectory data loaded', {
+      hasBarPath: !!td?.bar_path?.length,
+      barPathLen: td?.bar_path?.length || 0,
+      hasPersonPath: !!td?.person_path?.length,
+      personPathLen: td?.person_path?.length || 0,
+      videoInfoFromTracking: td?.video_info,
+      firstBarPoint: td?.bar_path?.[0],
+      overlayVideoPath: td?.overlay_video_path,
+    })
+    
     return trackingSession.trajectory_data as {
       video_info?: { width: number; height: number; fps: number; duration: number }
       bar_path?: Array<{ x: number; y: number; frame: number; timestamp: number; confidence: number; source?: string; speed?: number; bbox?: [number, number, number, number] }>
       person_path?: Array<{ x: number; y: number; frame: number; timestamp: number; confidence: number; bbox?: [number, number, number, number]; pose_landmarks?: Array<{ x: number; y: number; visibility: number }> }>
+      overlay_video_path?: string | null  // NEW: Pre-rendered overlay video
       click_to_track?: { enabled: boolean; click_point: [number, number]; total_frames: number; tracked_frames: number; tracking_rate: number }
       person_tracking?: { enabled: boolean; detected_frames: number; detection_rate: number }
       velocity_metrics?: { peak_concentric_velocity?: number; peak_eccentric_velocity?: number; average_speed?: number; vertical_displacement?: number; horizontal_deviation?: number; path_verticality?: number; estimated_reps?: number }
@@ -168,8 +198,22 @@ export default function VideoDetailPage({ params }: { params: Promise<{ id: stri
   })
 
   const processClickToTrack = useMutation({
-    mutationFn: async ({ clickPoint, model }: { clickPoint: { x: number; y: number }; model: string }) => {
-      return await apiClient.processWithClickToTrack(id, clickPoint, model as 'fastsam' | 'sam2')
+    mutationFn: async ({ 
+      clickPoint, 
+      model, 
+      frameRange 
+    }: { 
+      clickPoint: { x: number; y: number }
+      model: string
+      frameRange?: { start: number; end?: number }
+    }) => {
+      return await apiClient.processWithClickToTrack(
+        id, 
+        clickPoint, 
+        model as 'fastsam' | 'sam2',
+        frameRange?.start,
+        frameRange?.end
+      )
     },
     onSuccess: () => {
       toast.success('Processing started')
@@ -186,9 +230,18 @@ export default function VideoDetailPage({ params }: { params: Promise<{ id: stri
   }
   const videoUrl = getVideoUrl()
 
+  // Get pre-rendered overlay video URL if available
+  const getOverlayVideoUrl = () => {
+    if (!trajectoryData?.overlay_video_path) return null
+    const { data } = supabase.storage.from('videos').getPublicUrl(trajectoryData.overlay_video_path)
+    return data.publicUrl
+  }
+  const overlayVideoUrl = getOverlayVideoUrl()
+
   const handleTimeUpdate = useCallback((currentTime: number) => {
     if (!video?.fps) return
-    setCurrentFrame(Math.floor(currentTime * video.fps))
+    const calculatedFrame = Math.floor(currentTime * video.fps)
+    setCurrentFrame(calculatedFrame)
   }, [video?.fps])
 
   if (videoLoading) {
@@ -230,6 +283,7 @@ export default function VideoDetailPage({ params }: { params: Promise<{ id: stri
               video.status === 'completed' && videoUrl ? (
                 <ProcessedVideoViewer
                   videoUrl={videoUrl}
+                  overlayVideoUrl={overlayVideoUrl}
                   width={videoWidth}
                   height={videoHeight}
                   fps={videoFps}
@@ -285,7 +339,9 @@ export default function VideoDetailPage({ params }: { params: Promise<{ id: stri
               <CalibrationStep
                 videoId={id}
                 onComplete={(bbox) => processVideo.mutate(bbox)}
-                onClickToTrackComplete={(point, model) => processClickToTrack.mutate({ clickPoint: point, model })}
+                onClickToTrackComplete={(point, model, frameRange) => 
+                  processClickToTrack.mutate({ clickPoint: point, model, frameRange })
+                }
                 onCancel={() => setShowCalibration(false)}
               />
             )}
@@ -330,9 +386,37 @@ export default function VideoDetailPage({ params }: { params: Promise<{ id: stri
                     <span>{trajectoryData.velocity_metrics.estimated_reps} reps</span>
                   )}
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => setShowCalibration(true)}>
-                  <RefreshCw className="h-3.5 w-3.5 mr-1" />Reprocess
-                </Button>
+                <div className="flex gap-2">
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={async () => {
+                      try {
+                        const response = await fetch(`http://localhost:8000/api/click-to-track/${id}/download`)
+                        if (!response.ok) throw new Error('Download failed')
+                        
+                        const blob = await response.blob()
+                        const url = URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url
+                        a.download = `processed_${video.filename}`
+                        document.body.appendChild(a)
+                        a.click()
+                        document.body.removeChild(a)
+                        URL.revokeObjectURL(url)
+                        
+                        toast.success('Video downloaded!')
+                      } catch (error) {
+                        toast.error('Failed to download video')
+                      }
+                    }}
+                  >
+                    <Download className="h-3.5 w-3.5 mr-1" />Download
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setShowCalibration(true)}>
+                    <RefreshCw className="h-3.5 w-3.5 mr-1" />Reprocess
+                  </Button>
+                </div>
               </div>
             )}
           </div>

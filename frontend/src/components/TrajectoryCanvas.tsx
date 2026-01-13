@@ -3,6 +3,32 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
 import type { DetectionResult, PoseLandmark as ImportedPoseLandmark, ObjectDetection } from '@/types'
 
+// Debug logging for frame sync diagnosis - set to true to enable
+const DEBUG_FRAME_SYNC = true
+let lastDebugLogTime = 0
+const debugLog = (location: string, message: string, data?: Record<string, unknown>, throttleMs = 0) => {
+  if (!DEBUG_FRAME_SYNC) return
+  const now = performance.now()
+  // Throttle to avoid spam during playback
+  if (throttleMs > 0 && now - lastDebugLogTime < throttleMs) return
+  lastDebugLogTime = now
+  
+  const logEntry = {
+    location,
+    message,
+    data,
+    timestamp: now,
+    time: new Date().toISOString(),
+  }
+  console.log(`[TrajectoryCanvas] ${message}`, data || '')
+  // Also send to debug server if available
+  fetch('http://127.0.0.1:7244/ingest/frame-sync-debug', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(logEntry),
+  }).catch(() => {})
+}
+
 interface BarPathPoint {
   x: number
   y: number
@@ -135,9 +161,13 @@ export function TrajectoryCanvas({
       if (rect.width === 0 || rect.height === 0) return
       
       const calculatedRect = calculateVideoRect(rect.width, rect.height)
-      // #region agent log
-      fetch('http://127.0.0.1:7244/ingest/20a92eef-16ab-4de5-b181-01e406a7ee4c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TrajectoryCanvas.tsx:updateSize',message:'Canvas size update',data:{containerW:rect.width,containerH:rect.height,videoNativeW:videoWidth,videoNativeH:videoHeight,calculatedVideoRect:calculatedRect},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A,C,D'})}).catch(()=>{});
-      // #endregion
+      debugLog('TrajectoryCanvas:resize', 'Canvas size update', {
+        containerW: rect.width,
+        containerH: rect.height,
+        videoNativeW: videoWidth,
+        videoNativeH: videoHeight,
+        calculatedVideoRect: calculatedRect,
+      }, 1000) // Throttle resize logs to every 1s
       setCanvasSize({ width: rect.width, height: rect.height })
       setVideoRect(calculatedRect)
       canvas.width = rect.width
@@ -175,14 +205,24 @@ export function TrajectoryCanvas({
 
     if (!hasBarPathData && !hasPersonPathData && !hasDetectionData) return
 
-    // Find current detection data
+    // Frame offset to compensate for browser video decode-to-display delay
+    // video.currentTime reports decoded time, but display is ~1-2 frames behind
+    // Subtracting 1 frame makes the overlay match the displayed video better
+    const FRAME_DISPLAY_OFFSET = 1
+    const adjustedFrame = Math.max(0, currentFrame - FRAME_DISPLAY_OFFSET)
+    
+    // Calculate frame range info for debugging
+    const barFrameMin = barPath && barPath.length > 0 ? Math.min(...barPath.map(p => p.frame)) : null
+    const barFrameMax = barPath && barPath.length > 0 ? Math.max(...barPath.map(p => p.frame)) : null
+    
+    // Find current detection data using adjusted frame
     let currentData: DetectionResult | undefined = undefined
     if (hasDetectionData) {
-      currentData = detectionResults.find(r => r.frame_number === currentFrame)
+      currentData = detectionResults.find(r => r.frame_number === adjustedFrame)
       if (!currentData) {
         let minDiff = Infinity
         for (const r of detectionResults) {
-          const diff = Math.abs(r.frame_number - currentFrame)
+          const diff = Math.abs(r.frame_number - adjustedFrame)
           if (diff < minDiff) {
             minDiff = diff
             currentData = r
@@ -192,9 +232,17 @@ export function TrajectoryCanvas({
       if (!currentData) currentData = detectionResults[0]
     }
 
-    // #region agent log
-    fetch('http://127.0.0.1:7244/ingest/20a92eef-16ab-4de5-b181-01e406a7ee4c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TrajectoryCanvas.tsx:draw',message:'Drawing start',data:{hasBarPath:!!(barPath&&barPath.length>0),barPathLen:barPath?.length||0,firstBarPoint:barPath?.[0],videoRect,canvasSize},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B,E'})}).catch(()=>{});
-    // #endregion
+    // Debug logging with throttle during playback (every 300ms)
+    debugLog('TrajectoryCanvas:draw', 'Drawing frame', {
+      currentFrame,
+      adjustedFrame,
+      barPathLength: barPath?.length || 0,
+      personPathLength: personPath?.length || 0,
+      barFrameRange: (barFrameMin !== null && barFrameMax !== null) ? `${barFrameMin}-${barFrameMax}` : 'none',
+      frameInRange: (barFrameMin !== null && barFrameMax !== null) ? (adjustedFrame >= barFrameMin && adjustedFrame <= barFrameMax) : false,
+      videoNativeDims: `${videoWidth}x${videoHeight}`,
+      canvasDims: `${canvasSize.width}x${canvasSize.height}`,
+    }, 300)
 
     // ========== DRAW BAR PATH ==========
     if (showBarPath && barPath && barPath.length > 1) {
@@ -219,11 +267,34 @@ export function TrajectoryCanvas({
       }
       ctx.stroke()
 
-      // Current bar position
-      const currentBarPoint = barPath.find(p => p.frame === currentFrame) || barPath[barPath.length - 1]
-      // #region agent log
-      fetch('http://127.0.0.1:7244/ingest/20a92eef-16ab-4de5-b181-01e406a7ee4c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TrajectoryCanvas.tsx:currentBar',message:'Current bar point full data',data:{currentFrame,currentBarPointKeys:currentBarPoint?Object.keys(currentBarPoint):[],hasBbox:!!currentBarPoint?.bbox,bbox:currentBarPoint?.bbox,x:currentBarPoint?.x,y:currentBarPoint?.y,confidence:currentBarPoint?.confidence},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B,E'})}).catch(()=>{});
-      // #endregion
+      // Current bar position - use adjustedFrame and find closest frame if exact match not found
+      // This handles sparse tracking data where not every frame has tracking
+      let currentBarPoint = barPath.find(p => p.frame === adjustedFrame)
+      const exactMatch = !!currentBarPoint
+      let frameDiff = 0
+      
+      if (!currentBarPoint) {
+        // Find the closest frame to adjustedFrame
+        let minDiff = Infinity
+        for (const p of barPath) {
+          const diff = Math.abs(p.frame - adjustedFrame)
+          if (diff < minDiff) {
+            minDiff = diff
+            currentBarPoint = p
+            frameDiff = diff
+          }
+        }
+      }
+      
+      // Log bar point matching - important for diagnosing lag
+      debugLog('TrajectoryCanvas:barMatch', 'Bar point match', {
+        requestedFrame: adjustedFrame,
+        matchedFrame: currentBarPoint?.frame,
+        exactMatch,
+        frameDiff,
+        barPosition: currentBarPoint ? { x: currentBarPoint.x, y: currentBarPoint.y } : null,
+        hasBox: !!currentBarPoint?.bbox,
+      }, 300)
       if (currentBarPoint) {
         const bx = scaleX(currentBarPoint.x)
         const by = scaleY(currentBarPoint.y)
@@ -294,22 +365,31 @@ export function TrajectoryCanvas({
 
     // ========== DRAW POSE SKELETON ==========
     // First check detection results, then check personPath for pose_landmarks
-    const currentPersonPoint = personPath?.find(p => p.frame === currentFrame)
+    // Only use exact frame matches to avoid jitter from jumping between frames
+    let currentPersonPoint = personPath?.find(p => p.frame === adjustedFrame)
+    
+    // If no exact match, try one frame before/after to handle sparse data
+    if (!currentPersonPoint && personPath && personPath.length > 0) {
+      currentPersonPoint = personPath.find(p => p.frame === adjustedFrame + 1) 
+        || personPath.find(p => p.frame === adjustedFrame - 1)
+    }
+    
     const poseLandmarks = currentData?.pose_landmarks || currentPersonPoint?.pose_landmarks
     
     if (showPose && poseLandmarks) {
       const landmarks = poseLandmarks as PoseLandmark[]
       if (landmarks && landmarks.length > 0) {
-        // Draw skeleton
+        // Draw skeleton with slightly thicker lines for stability
         ctx.strokeStyle = POSE_COLOR
-        ctx.lineWidth = 4
+        ctx.lineWidth = 3
         ctx.lineCap = 'round'
 
         for (const [startIdx, endIdx] of POSE_CONNECTIONS) {
           const p1 = landmarks[startIdx]
           const p2 = landmarks[endIdx]
           if (!p1 || !p2) continue
-          if ((p1.visibility || 0) < 0.3 || (p2.visibility || 0) < 0.3) continue
+          // Increase visibility threshold to reduce low-confidence jitter
+          if ((p1.visibility || 0) < 0.5 || (p2.visibility || 0) < 0.5) continue
 
           const x1 = scaleX(p1.x * videoWidth)
           const y1 = scaleY(p1.y * videoHeight)
@@ -327,7 +407,8 @@ export function TrajectoryCanvas({
         const jointIndices = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
         for (const idx of jointIndices) {
           const landmark = landmarks[idx]
-          if (!landmark || (landmark.visibility || 0) < 0.3) continue
+          // Higher visibility threshold to reduce jitter
+          if (!landmark || (landmark.visibility || 0) < 0.5) continue
 
           const x = scaleX(landmark.x * videoWidth)
           const y = scaleY(landmark.y * videoHeight)
@@ -349,13 +430,14 @@ export function TrajectoryCanvas({
         // Wrist rings (COCO: 9=left wrist, 10=right wrist)
         for (const idx of [9, 10]) {
           const landmark = landmarks[idx]
-          if (!landmark || (landmark.visibility || 0) < 0.3) continue
+          // Higher visibility threshold to reduce jitter
+          if (!landmark || (landmark.visibility || 0) < 0.5) continue
 
           const x = scaleX(landmark.x * videoWidth)
           const y = scaleY(landmark.y * videoHeight)
 
           ctx.beginPath()
-          ctx.arc(x, y, 12, 0, Math.PI * 2)
+          ctx.arc(x, y, 10, 0, Math.PI * 2)
           ctx.strokeStyle = WRIST_COLOR
           ctx.lineWidth = 2
           ctx.stroke()
